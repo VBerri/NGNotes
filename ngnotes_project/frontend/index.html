@@ -135,6 +135,16 @@ Engineering notes:
                                 <input type="number" id="top-k" min="1" value="40">
                             </div>
                         </div>
+                        <div class="form-row-2">
+                            <div class="form-group">
+                                <label for="repetition-penalty">Repetition Penalty</label>
+                                <input type="number" id="repetition-penalty" min="0" max="3" step="0.05" value="1.0">
+                            </div>
+                            <div class="form-group">
+                                <label for="min-p">Min-p</label>
+                                <input type="number" id="min-p" min="0" max="1" step="0.01" value="0.05">
+                            </div>
+                        </div>
 
                         <div class="divider"></div>
 
@@ -157,6 +167,16 @@ Engineering notes:
                                 <input type="number" id="run-top-k" min="1" value="40">
                             </div>
                         </div>
+                        <div class="form-row-2">
+                            <div class="form-group">
+                                <label for="run-repetition-penalty">Run Repetition Penalty</label>
+                                <input type="number" id="run-repetition-penalty" min="0" max="3" step="0.05" value="1.0">
+                            </div>
+                            <div class="form-group">
+                                <label for="run-min-p">Run Min-p</label>
+                                <input type="number" id="run-min-p" min="0" max="1" step="0.01" value="0.05">
+                            </div>
+                        </div>
                         <div class="button-group compact-top">
                             <button id="sync-run-defaults" class="btn btn-secondary" type="button">Use Current Eval Settings For Run Mode</button>
                         </div>
@@ -177,7 +197,8 @@ Engineering notes:
                             <div id="runtime-stats" class="runtime-stats">Stored rows: 0</div>
                             <div class="button-group toolbar-buttons">
                                 <button id="refresh-runtime-btn" class="btn btn-secondary" type="button">Refresh Count</button>
-                                <button id="export-runtime-btn" class="btn btn-primary" type="button">Export To Excel</button>
+                                <button id="export-runtime-btn" class="btn btn-secondary" type="button">Export To Excel</button>
+                                <button id="export-eval-pdf-btn" class="btn btn-primary" type="button">Export PDF Report</button>
                                 <button id="clear-runtime-btn" class="btn btn-secondary" type="button">Clear Stored Data</button>
                             </div>
                         </div>
@@ -256,6 +277,6 @@ Engineering notes:
 
     </div>
 
-    <script src="app.js?v=20260623-4"></script>
+    <script src="app.js?v=20260624-5"></script>
 </body>
 </html>

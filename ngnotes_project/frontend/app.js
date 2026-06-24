@@ -29,11 +29,15 @@ const variantSelect = document.getElementById("prompt-variant");
 const tempInput = document.getElementById("temperature");
 const topPInput = document.getElementById("top-p");
 const topKInput = document.getElementById("top-k");
+const repetitionPenaltyInput = document.getElementById("repetition-penalty");
+const minPInput = document.getElementById("min-p");
 
 const runModelSelect = document.getElementById("run-model");
 const runTempInput = document.getElementById("run-temperature");
 const runTopPInput = document.getElementById("run-top-p");
 const runTopKInput = document.getElementById("run-top-k");
+const runRepetitionPenaltyInput = document.getElementById("run-repetition-penalty");
+const runMinPInput = document.getElementById("run-min-p");
 const syncRunDefaultsBtn = document.getElementById("sync-run-defaults");
 
 const generateBtn = document.getElementById("generate-btn");
@@ -42,6 +46,7 @@ const resultsContainer = document.getElementById("results-container");
 const runtimeStats = document.getElementById("runtime-stats");
 const refreshRuntimeBtn = document.getElementById("refresh-runtime-btn");
 const exportRuntimeBtn = document.getElementById("export-runtime-btn");
+const exportEvalPdfBtn = document.getElementById("export-eval-pdf-btn");
 const clearRuntimeBtn = document.getElementById("clear-runtime-btn");
 
 const runInput = document.getElementById("run-input");
@@ -116,6 +121,11 @@ function parseNumber(value, fallback) {
 
 function parseIntOrNull(value) {
   const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseFloatOrNull(value) {
+  const n = Number.parseFloat(value);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -295,6 +305,47 @@ async function exportRuntimeExcel() {
   }
 }
 
+async function exportEvalPdfReport() {
+  const originalLabel = exportEvalPdfBtn.textContent;
+  try {
+    exportEvalPdfBtn.disabled = true;
+    exportEvalPdfBtn.textContent = "Generating Report...";
+
+    // Pass the current run-model so the user's chosen LLM writes the report.
+    const model = (runModelSelect.value || "").trim();
+    const url = model
+      ? `${apiBase()}/api/export-eval-report-pdf?model=${encodeURIComponent(model)}`
+      : `${apiBase()}/api/export-eval-report-pdf`;
+
+    const res = await fetch(url, { method: "POST" });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || res.statusText || "PDF report generation failed");
+    }
+
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const dispo = res.headers.get("Content-Disposition") || "";
+    const match = dispo.match(/filename="?([^";\/\\]+)"?/i);
+    const filename = match ? match[1] : `ngnotes_eval_report_${Date.now()}.pdf`;
+
+    const link = document.createElement("a");
+    link.href = objUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objUrl);
+    setRunStatus(`Evaluation PDF report downloaded (${filename}).`);
+  } catch (e) {
+    showEvalError(`Failed to generate PDF report: ${e.message}`);
+  } finally {
+    exportEvalPdfBtn.disabled = false;
+    exportEvalPdfBtn.textContent = originalLabel;
+  }
+}
+
 async function clearRuntimeData() {
   try {
     clearRuntimeBtn.disabled = true;
@@ -358,8 +409,10 @@ function updateRunMeta() {
   const model = runModelSelect.value || "-";
   const t = runTempInput.value || "-";
   const p = runTopPInput.value || "-";
+  const mp = runMinPInput.value || "-";
   const k = runTopKInput.value || "-";
-  runMeta.textContent = `Model: ${model} | Temp: ${t} | Top-p: ${p} | Top-k: ${k}`;
+  const rp = runRepetitionPenaltyInput.value || "-";
+  runMeta.textContent = `Model: ${model} | Temp: ${t} | Top-p: ${p} | Min-p: ${mp} | Top-k: ${k} | Repeat: ${rp}`;
 }
 
 function switchMode(mode) {
@@ -405,7 +458,9 @@ function populateRunModelOptions(models) {
 function syncRunDefaultsFromEval() {
   runTempInput.value = tempInput.value || "0.3";
   runTopPInput.value = topPInput.value || "0.95";
+  runMinPInput.value = minPInput.value || "0.05";
   runTopKInput.value = topKInput.value || "40";
+  runRepetitionPenaltyInput.value = repetitionPenaltyInput.value || "1.0";
 
   const evalModels = getModels();
   if (evalModels.length) {
@@ -510,7 +565,7 @@ function renderEvalResults(data) {
         <div class="result-header">
           <span class="model-name">${escapeHtml(r.model)}</span>
           <span class="variant-badge">${escapeHtml(r.prompt_variant)}</span>
-          <span class="param-info">temp=${r.temperature} · top_p=${r.top_p} · max_tokens=${r.max_tokens}</span>
+          <span class="param-info">temp=${r.temperature} · top_p=${r.top_p} · min_p=${r.min_p ?? "-"} · top_k=${r.top_k ?? "-"} · rep=${r.repetition_penalty ?? "-"} · max_tokens=${r.max_tokens}</span>
         </div>
         <div class="chips-row">
           ${scoreChip("ROUGE-L", r.rouge_l_f1)}
@@ -567,7 +622,9 @@ async function handleGenerate() {
         params: {
           temperature: parseNumber(tempInput.value, 0.3),
           top_p: parseNumber(topPInput.value, 0.95),
+          min_p: parseFloatOrNull(minPInput.value),
           top_k: parseIntOrNull(topKInput.value),
+          repetition_penalty: parseFloatOrNull(repetitionPenaltyInput.value),
           max_tokens: 700,
         },
       };
@@ -629,9 +686,10 @@ async function handleEvaluate() {
     prompt_variants: [variantSelect.value],
     temperatures: [parseNumber(tempInput.value, 0.3)],
     top_ps: [parseNumber(topPInput.value, 0.95)],
+    min_ps: [parseFloatOrNull(minPInput.value)],
     top_ks: [parseIntOrNull(topKInput.value)],
     max_tokens: [700],
-    repetition_penalties: [1.0],
+    repetition_penalties: [parseFloatOrNull(repetitionPenaltyInput.value)],
     mode: modeSelect.value,
     ...promptSettings,
     rubric: { enabled: true },
@@ -831,9 +889,19 @@ async function extractDocumentToNotes(file) {
       throw new Error(data.detail || res.statusText || "Upload failed");
     }
 
-    runInput.value = data.extracted_text || "";
+    const extracted = (data.extracted_text || "").trim();
+    if (!extracted) {
+      setImageStatus(`Loaded ${data.filename}, but no extractable text was found.`);
+      clearRunFileBtn.classList.remove("hidden");
+      return;
+    }
+
+    const existing = (runInput.value || "").trim();
+    runInput.value = existing
+      ? `${existing}\n\n--- Attached file: ${data.filename} ---\n${extracted}`
+      : extracted;
     setImageStatus(
-      `Loaded ${data.filename} (${data.char_count || 0} chars) into notes.`
+      `Added ${data.filename} (${data.char_count || 0} chars) to notes.`
     );
     clearRunFileBtn.classList.remove("hidden");
   } catch (e) {
@@ -853,17 +921,31 @@ async function handleUnifiedUpload() {
   if (looksLikeImageFile(file)) {
     await attachImage(file);
   } else {
-    // Document/text path -- also clear any prior attached image since the
-    // notes textarea (not the vision panel) becomes the source of truth.
-    clearAttachedImage();
+    // Document/text path -- keep any attached image so summarize can combine
+    // notes + extracted file text + image analysis in one report.
     await extractDocumentToNotes(file);
   }
 }
 
+function buildCombinedRunInput() {
+  const note = (runInput.value || "").trim();
+  const description = (visionDescriptionEl.value || "").trim();
+
+  const parts = [];
+  if (note) parts.push(`Engineering Notes:\n${note}`);
+  if (description) parts.push(`Image Analysis Description:\n${description}`);
+
+  return {
+    combinedText: parts.join("\n\n"),
+    note,
+    description,
+  };
+}
+
 async function handleRunSummarize() {
-  const note = runInput.value.trim();
-  if (note.length < 20) {
-    setRunStatus("Engineering note must be at least 20 characters.", true);
+  const { combinedText, note, description } = buildCombinedRunInput();
+  if (combinedText.length < 20) {
+    setRunStatus("Add at least 20 characters of notes, file text, or image description.", true);
     return;
   }
 
@@ -880,7 +962,7 @@ async function handleRunSummarize() {
   const promptSettings = getPromptSettings();
 
   const payload = {
-    engineering_note: note,
+    engineering_note: combinedText,
     model: runModel,
     mode: modeSelect.value,
     prompt_variant: variantSelect.value,
@@ -888,7 +970,9 @@ async function handleRunSummarize() {
     params: {
       temperature: parseNumber(runTempInput.value, 0.3),
       top_p: parseNumber(runTopPInput.value, 0.95),
+      min_p: parseFloatOrNull(runMinPInput.value),
       top_k: parseIntOrNull(runTopKInput.value),
+      repetition_penalty: parseFloatOrNull(runRepetitionPenaltyInput.value),
       max_tokens: 700,
     },
   };
@@ -932,7 +1016,7 @@ async function handleRunSummarize() {
         model: runModel,
         mode: modeSelect.value,
         prompt_variant: variantSelect.value,
-        engineering_note: note,
+        engineering_note: combinedText,
         image_description: payload.image_description || null,
       };
       runDownloadPdfBtn.disabled = false;
@@ -1012,6 +1096,7 @@ runDownloadPdfBtn.addEventListener("click", handleRunDownloadPdf);
 syncRunDefaultsBtn.addEventListener("click", syncRunDefaultsFromEval);
 refreshRuntimeBtn.addEventListener("click", refreshRuntimeStats);
 exportRuntimeBtn.addEventListener("click", exportRuntimeExcel);
+exportEvalPdfBtn.addEventListener("click", exportEvalPdfReport);
 clearRuntimeBtn.addEventListener("click", clearRuntimeData);
 uploadEvalNoteBtn.addEventListener("click", () =>
   uploadNoteFile(evalNoteFileInput, noteInput, evalUploadStatus, uploadEvalNoteBtn)
@@ -1040,7 +1125,7 @@ modelsInput.addEventListener("change", () => {
   }
 });
 
-[runModelSelect, runTempInput, runTopPInput, runTopKInput].forEach((el) => {
+[runModelSelect, runTempInput, runTopPInput, runMinPInput, runTopKInput, runRepetitionPenaltyInput].forEach((el) => {
   el.addEventListener("change", updateRunMeta);
 });
 

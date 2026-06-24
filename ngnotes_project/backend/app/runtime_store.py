@@ -57,6 +57,7 @@ class RuntimeStore:
             "mode",
             "temperature",
             "top_p",
+            "min_p",
             "top_k",
             "max_tokens",
             "repetition_penalty",
@@ -79,7 +80,7 @@ class RuntimeStore:
 
         # Light quality-of-life formatting.
         ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:U{max(2, len(rows) + 1)}"
+        ws.auto_filter.ref = f"A1:V{max(2, len(rows) + 1)}"
 
         output = BytesIO()
         wb.save(output)

@@ -151,6 +151,7 @@ class Evaluator:
         prompt_variants: List[PromptVariant],
         temperatures: List[float],
         top_ps: List[float],
+        min_ps: List[Optional[float]],
         top_ks: List[Optional[int]],
         max_tokens: List[int],
         repetition_penalties: List[Optional[float]],
@@ -168,24 +169,26 @@ class Evaluator:
                 for variant in prompt_variants:
                     for temp in temperatures:
                         for top_p in top_ps:
-                            for top_k in top_ks:
-                                for max_tok in max_tokens:
-                                    for rep_penalty in repetition_penalties:
-                                        result = await self._run_single(
-                                            case=case,
-                                            model=model,
-                                            variant=variant,
-                                            temperature=temp,
-                                            top_p=top_p,
-                                            top_k=top_k,
-                                            max_tokens=max_tok,
-                                            repetition_penalty=rep_penalty,
-                                            mode=mode,
-                                            system_prompt=system_prompt,
-                                            user_prompt_template=user_prompt_template,
-                                            rubric=rubric,
-                                        )
-                                        all_results.append(result)
+                            for min_p in min_ps:
+                                for top_k in top_ks:
+                                    for max_tok in max_tokens:
+                                        for rep_penalty in repetition_penalties:
+                                            result = await self._run_single(
+                                                case=case,
+                                                model=model,
+                                                variant=variant,
+                                                temperature=temp,
+                                                top_p=top_p,
+                                                min_p=min_p,
+                                                top_k=top_k,
+                                                max_tokens=max_tok,
+                                                repetition_penalty=rep_penalty,
+                                                mode=mode,
+                                                system_prompt=system_prompt,
+                                                user_prompt_template=user_prompt_template,
+                                                rubric=rubric,
+                                            )
+                                            all_results.append(result)
 
         # Sort by final_score descending; unscored/error runs go last.
         all_results.sort(
@@ -239,6 +242,7 @@ class Evaluator:
         variant: PromptVariant,
         temperature: float,
         top_p: float,
+        min_p: Optional[float],
         top_k: Optional[int],
         max_tokens: int,
         repetition_penalty: Optional[float],
@@ -253,6 +257,8 @@ class Evaluator:
             "top_p": top_p,
             "max_tokens": max_tokens,
         }
+        if min_p is not None:
+            params["min_p"] = min_p
         if top_k is not None:
             params["top_k"] = top_k
         if repetition_penalty is not None:
@@ -315,6 +321,7 @@ class Evaluator:
             prompt_variant=variant,
             temperature=temperature,
             top_p=top_p,
+            min_p=min_p,
             top_k=top_k,
             max_tokens=max_tokens,
             repetition_penalty=repetition_penalty,

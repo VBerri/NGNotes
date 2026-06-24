@@ -44,6 +44,7 @@ class LLMClient:
         merged: Dict[str, Any] = {
             "temperature": 0.3,
             "top_p": 0.95,
+            "min_p": None,
             "top_k": 40,
             "max_tokens": 700,
             "repetition_penalty": None,
@@ -79,6 +80,8 @@ class LLMClient:
         # Only add optional params when they have a real value
         if merged.get("top_k") is not None:
             payload["top_k"] = merged["top_k"]
+        if merged.get("min_p") is not None:
+            payload["min_p"] = merged["min_p"]
         if merged.get("repetition_penalty") is not None:
             payload["repetition_penalty"] = merged["repetition_penalty"]
 

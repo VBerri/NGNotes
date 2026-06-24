@@ -21,6 +21,8 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.shapes import Drawing
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
@@ -28,6 +30,8 @@ from reportlab.platypus import (
     PageTemplate,
     Paragraph,
     Spacer,
+    Table,
+    TableStyle,
 )
 
 
@@ -256,6 +260,186 @@ def build_summary_pdf(report: PdfReport) -> bytes:
         flowables.append(PageBreak())
         flowables.append(Paragraph("Source Engineering Notes", styles["h2"]))
         flowables.extend(_render_markdown_block(report.engineering_note, styles))
+
+    doc.build(flowables)
+    return buf.getvalue()
+
+
+def _fmt_metric(value: Optional[float]) -> str:
+    return f"{value:.4f}" if value is not None else "-"
+
+
+def _soft_wrap_model_name(name: str, chunk: int = 18) -> str:
+    raw = (name or "-").strip()
+    if not raw:
+        return "-"
+    parts = [raw[i:i + chunk] for i in range(0, len(raw), chunk)]
+    return "<br/>".join(html.escape(p) for p in parts)
+
+
+def _metric_chart(
+    model_stats: list[dict], key: str, color: colors.Color, short_label_map: dict
+) -> Optional[Drawing]:
+    points = [(m.get("model", "-"), m.get(key)) for m in model_stats]
+    points = [(name, value) for name, value in points if value is not None]
+    if not points:
+        return None
+
+    names = [short_label_map.get(name, name[:8]) for name, _ in points]
+    values = [float(v) for _, v in points]
+
+    drawing = Drawing(500, 180)
+    chart = VerticalBarChart()
+    chart.x = 36
+    chart.y = 34
+    chart.height = 116
+    chart.width = 430
+    chart.data = [values]
+    chart.categoryAxis.categoryNames = names
+    chart.categoryAxis.labels.fontName = "Helvetica"
+    chart.categoryAxis.labels.fontSize = 8
+    chart.categoryAxis.labels.angle = 20
+    chart.categoryAxis.labels.dy = -8
+    chart.valueAxis.valueMin = 0.0
+    upper = max(values) * 1.15
+    chart.valueAxis.valueMax = max(1.0, round(upper, 2))
+    chart.valueAxis.valueStep = max(0.1, round(chart.valueAxis.valueMax / 5.0, 2))
+    chart.valueAxis.labels.fontName = "Helvetica"
+    chart.valueAxis.labels.fontSize = 8
+    chart.bars[0].fillColor = color
+    drawing.add(chart)
+    return drawing
+
+
+def build_eval_stats_pdf(total_rows: int, model_stats: list[dict]) -> bytes:
+    """Render deterministic evaluation statistics PDF with tables and charts."""
+    buf = BytesIO()
+    styles = _build_styles()
+
+    report = PdfReport(
+        summary="",
+        model="deterministic-metrics",
+        mode="Evaluation Stats Report",
+        prompt_variant="raw runtime rows",
+        generated_at=datetime.utcnow(),
+    )
+
+    doc = BaseDocTemplate(
+        buf,
+        pagesize=LETTER,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=1.0 * inch,
+        bottomMargin=0.75 * inch,
+        title="NGNotes Evaluation Performance",
+        author="NGNotes",
+    )
+    frame = Frame(
+        doc.leftMargin, doc.bottomMargin,
+        doc.width, doc.height,
+        id="body", showBoundary=0,
+    )
+    doc.addPageTemplates([
+        PageTemplate(id="default", frames=[frame], onPage=_make_page_decorator(report)),
+    ])
+
+    flowables: List = []
+    flowables.append(Paragraph("Evaluation Performance Report", styles["h1"]))
+    flowables.append(
+        Paragraph(
+            f"Rows analyzed: <b>{total_rows}</b>  ·  Models: <b>{len(model_stats)}</b>",
+            styles["meta"],
+        )
+    )
+    flowables.append(Spacer(1, 10))
+
+    short_label_map = {
+        item.get("model", "-"): f"M{idx + 1}"
+        for idx, item in enumerate(model_stats)
+    }
+
+    table_data = [[
+        "Model", "Runs", "Scored", "Final Avg", "Composite Avg", "Semantic Avg", "ROUGE-L Avg"
+    ]]
+    for item in model_stats:
+        table_data.append([
+            Paragraph(_soft_wrap_model_name(str(item.get("model", "-"))), styles["body"]),
+            str(item.get("runs", 0)),
+            str(item.get("scored", 0)),
+            _fmt_metric(item.get("final_avg")),
+            _fmt_metric(item.get("composite_avg")),
+            _fmt_metric(item.get("semantic_avg")),
+            _fmt_metric(item.get("rouge_avg")),
+        ])
+
+    col_widths = [188, 36, 40, 58, 64, 64, 58]
+    table = Table(table_data, repeatRows=1, colWidths=col_widths)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), GT_NAVY),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTSIZE", (0, 1), (-1, -1), 7),
+        ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F3F4F6")]),
+        ("GRID", (0, 0), (-1, -1), 0.25, GRAY_BORDER),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    flowables.append(table)
+    flowables.append(Spacer(1, 12))
+
+    flowables.append(Paragraph("Metric Charts (Averages by Model)", styles["h2"]))
+    chart_specs = [
+        ("final_avg", "Final Score", colors.HexColor("#1D4ED8")),
+        ("composite_avg", "Composite Score", colors.HexColor("#047857")),
+        ("semantic_avg", "Semantic Similarity", colors.HexColor("#B45309")),
+        ("rouge_avg", "ROUGE-L F1", colors.HexColor("#6D28D9")),
+    ]
+    for key, label, color in chart_specs:
+        chart = _metric_chart(model_stats, key, color, short_label_map)
+        if chart is None:
+            flowables.append(Paragraph(f"{label}: no scored data", styles["body"]))
+            continue
+        flowables.append(Paragraph(label, styles["h3"]))
+        flowables.append(chart)
+        flowables.append(Spacer(1, 8))
+
+    legend_rows = [["Chart Label", "Model"]]
+    for item in model_stats:
+        model_name = str(item.get("model", "-"))
+        legend_rows.append([
+            short_label_map.get(model_name, "-"),
+            Paragraph(_soft_wrap_model_name(model_name, chunk=26), styles["body"]),
+        ])
+
+    flowables.append(Paragraph("Chart Label Legend", styles["h3"]))
+    legend = Table(legend_rows, repeatRows=1, colWidths=[68, 422])
+    legend.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E5E7EB")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), GT_NAVY),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTSIZE", (0, 1), (-1, -1), 7),
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.25, GRAY_BORDER),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    flowables.append(legend)
+    flowables.append(Spacer(1, 8))
+
+    flowables.append(PageBreak())
+    flowables.append(Paragraph("Configuration Snapshot", styles["h2"]))
+    for item in model_stats:
+        flowables.append(Paragraph(str(item.get("model", "-")), styles["h3"]))
+        flowables.append(Paragraph(f"Runs: {item.get('runs', 0)} | Scored: {item.get('scored', 0)}", styles["body"]))
+        flowables.append(Paragraph(f"Prompt variants: {item.get('variants', '-')}", styles["body"]))
+        flowables.append(Paragraph(f"Modes: {item.get('modes', '-')}", styles["body"]))
+        flowables.append(Paragraph(f"Temperatures: {item.get('temperatures', '-')}", styles["body"]))
+        flowables.append(Spacer(1, 6))
 
     doc.build(flowables)
     return buf.getvalue()

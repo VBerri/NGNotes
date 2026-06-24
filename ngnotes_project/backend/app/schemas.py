@@ -96,6 +96,7 @@ class EvaluateRequest(BaseModel):
     prompt_variants: List[PromptVariant]
     temperatures: List[float]
     top_ps: List[float]
+    min_ps: List[Optional[float]]
     top_ks: List[Optional[int]]
     max_tokens: List[int]
     repetition_penalties: List[Optional[float]]
@@ -128,6 +129,7 @@ class EvalRunResult(BaseModel):
     prompt_variant: PromptVariant
     temperature: float
     top_p: float
+    min_p: Optional[float]
     top_k: Optional[int]
     max_tokens: int
     repetition_penalty: Optional[float]

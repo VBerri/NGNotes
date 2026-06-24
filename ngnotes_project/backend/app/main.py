@@ -27,7 +27,7 @@ from .eval import Evaluator
 from .runtime_store import RuntimeStore, now_iso
 from .file_extract import extract_text_from_upload
 from . import vision as vision_router
-from .pdf_export import PdfReport, build_summary_pdf
+from .pdf_export import PdfReport, build_summary_pdf, build_eval_stats_pdf
 
 app = FastAPI(
     title="NGNotes API",
@@ -226,6 +226,7 @@ async def generate_summary(request: GenerateRequest):
                 "mode": request.mode.value,
                 "temperature": (request.params or {}).get("temperature"),
                 "top_p": (request.params or {}).get("top_p"),
+                "min_p": (request.params or {}).get("min_p"),
                 "top_k": (request.params or {}).get("top_k"),
                 "max_tokens": (request.params or {}).get("max_tokens"),
                 "repetition_penalty": (request.params or {}).get("repetition_penalty"),
@@ -262,6 +263,7 @@ async def evaluate_summary(request: EvaluateRequest):
             prompt_variants=request.prompt_variants,
             temperatures=request.temperatures,
             top_ps=request.top_ps,
+            min_ps=request.min_ps,
             top_ks=request.top_ks,
             max_tokens=request.max_tokens,
             repetition_penalties=request.repetition_penalties,
@@ -286,6 +288,7 @@ async def evaluate_summary(request: EvaluateRequest):
                     "mode": request.mode.value,
                     "temperature": r.temperature,
                     "top_p": r.top_p,
+                    "min_p": r.min_p,
                     "top_k": r.top_k,
                     "max_tokens": r.max_tokens,
                     "repetition_penalty": r.repetition_penalty,
@@ -333,6 +336,89 @@ async def runtime_export_excel():
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
         },
+    )
+
+
+@app.post("/api/export-eval-report-pdf")
+async def export_eval_report_pdf(model: str | None = None):
+    """Aggregate stored evaluation stats and return a deterministic PDF with tables/charts."""
+    from collections import defaultdict
+
+    rows = runtime_store.list_rows()
+    if not rows:
+        raise HTTPException(
+            status_code=400,
+            detail="No stored evaluation data. Run an evaluation first.",
+        )
+
+    # ── Aggregate per-model stats ──────────────────────────────────────────
+    stats: dict = defaultdict(lambda: {
+        "runs": 0, "scored": 0,
+        "rouge_l": [], "semantic": [], "composite": [], "final": [],
+        "variants": set(), "temps": set(), "modes": set(),
+    })
+
+    for row in rows:
+        m = row.get("model") or "unknown"
+        s = stats[m]
+        s["runs"] += 1
+        s["variants"].add(row.get("prompt_variant") or "default")
+        t = row.get("temperature")
+        if t is not None:
+            s["temps"].add(t)
+        s["modes"].add(row.get("mode") or "—")
+        for field, key in [
+            ("rouge_l", "rouge_l_f1"),
+            ("semantic", "semantic_similarity"),
+            ("composite", "composite_score"),
+            ("final", "final_score"),
+        ]:
+            v = row.get(key)
+            if v is not None:
+                s[field].append(float(v))
+                if field == "final":
+                    s["scored"] += 1
+
+    def _avg(lst):
+        return round(sum(lst) / len(lst), 4) if lst else None
+
+    # `model` is accepted for backward compatibility with existing frontend
+    # query strings, but this endpoint is intentionally deterministic and does
+    # not call the LLM.
+    _ = model
+
+    def _max(lst):
+        return round(max(lst), 4) if lst else None
+
+    model_stats = []
+    for model_name, s in sorted(stats.items()):
+        model_stats.append(
+            {
+                "model": model_name,
+                "runs": s["runs"],
+                "scored": s["scored"],
+                "rouge_avg": _avg(s["rouge_l"]),
+                "semantic_avg": _avg(s["semantic"]),
+                "composite_avg": _avg(s["composite"]),
+                "final_avg": _avg(s["final"]),
+                "final_best": _max(s["final"]),
+                "variants": ", ".join(sorted(str(v) for v in s["variants"])) or "-",
+                "modes": ", ".join(sorted(str(v) for v in s["modes"])) or "-",
+                "temperatures": ", ".join(sorted(str(t) for t in s["temps"])) or "-",
+            }
+        )
+
+    try:
+        pdf_bytes = build_eval_stats_pdf(total_rows=len(rows), model_stats=model_stats)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"ngnotes_eval_report_{ts}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
