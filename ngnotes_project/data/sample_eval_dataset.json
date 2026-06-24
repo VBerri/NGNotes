@@ -1,0 +1,17 @@
+[
+  {
+    "case_id": "eng-001",
+    "engineering_note": "We migrated our notification system from cron to an event-driven queue. Latency dropped from 12 min to 40 seconds. Two incidents where retry storms caused cascading failures when downstream timed out. Team will add circuit breaker patterns and dead-letter queue alerts.",
+    "reference_summary": "The notification system was migrated from cron scheduling to an event-driven queue architecture, reducing latency from 12 minutes to 40 seconds. Two incidents involving retry storms and downstream timeouts were identified. Mitigation actions include implementing circuit breaker patterns and setting up dead-letter queue monitoring alerts."
+  },
+  {
+    "case_id": "eng-002",
+    "engineering_note": "Database migration from PostgreSQL 13 to 15 completed in staging. Observed 15% query performance improvement on analytical queries. One breaking change: removed pg_catalog.pg_statistic direct access. Auth service queries need index updates before prod cutover. Scheduled for next sprint.",
+    "reference_summary": "Staging migration from PostgreSQL 13 to 15 is complete, yielding a 15% improvement in analytical query performance. A breaking change removing direct access to pg_catalog.pg_statistic was identified. The auth service requires index updates prior to production cutover, which is scheduled for the next sprint."
+  },
+  {
+    "case_id": "eng-003",
+    "engineering_note": "API gateway rate limiting rollout complete. Limits: 1000 req/min per tenant, 100 req/min per user. Redis-backed sliding window. Load test showed 99th percentile latency at 18ms under 10k concurrent users. Edge case: bursts above limit return 429 with Retry-After header. Mobile clients need SDK update to handle backoff.",
+    "reference_summary": "API gateway rate limiting has been fully deployed with per-tenant (1000 req/min) and per-user (100 req/min) limits using a Redis-backed sliding window. Load testing confirmed 18ms p99 latency at 10k concurrent users. Clients exceeding limits receive 429 responses with Retry-After headers. Mobile SDK updates are required to handle backoff correctly."
+  }
+]

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NGNotes — Engineering Note Summarizer</title>
+    <link rel="stylesheet" href="styles.css?v=20260623-4">
+</head>
+<body>
+
+    <!-- Top Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-inner">
+            <div class="navbar-brand">
+                <span class="brand-mark">GT</span>
+                <span class="brand-name">NGNotes</span>
+            </div>
+            <span class="navbar-tagline">Engineering Intelligence Platform</span>
+        </div>
+    </nav>
+
+    <!-- Gold accent stripe -->
+    <div class="gold-stripe"></div>
+
+    <div class="container">
+
+        <!-- Page Hero -->
+        <header class="page-header">
+            <h1>Engineering Note Summarizer</h1>
+            <p>Switch between Evaluation Mode and Run Mode. Configure prompts and model settings in evaluation, then summarize instantly in run mode.</p>
+        </header>
+
+        <div class="mode-switch" role="tablist" aria-label="UI Mode Switch">
+            <button id="tab-evaluation" class="mode-tab active" role="tab" aria-selected="true">Evaluation Mode</button>
+            <button id="tab-run" class="mode-tab" role="tab" aria-selected="false">Run Mode</button>
+        </div>
+
+        <main>
+            <section id="evaluation-screen">
+                <section class="card" aria-label="Runtime settings">
+                    <div class="card-header">
+                        <h2>Runtime &amp; Model Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-row-2">
+                            <div class="form-group">
+                                <label for="backend-url">Backend URL</label>
+                                <input type="text" id="backend-url" value="http://localhost:8010" placeholder="http://localhost:8010">
+                            </div>
+                            <div class="form-group">
+                                <label for="models">Evaluation Models <span class="label-hint">(comma-separated)</span></label>
+                                <input type="text" id="models" placeholder="qwen2.5-coder:7b, qwen3-coder:latest">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card" aria-label="Prompt settings">
+                    <div class="card-header">
+                        <h2>Prompt Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="system-prompt">System Prompt</label>
+                            <textarea id="system-prompt" rows="3" placeholder="You are an expert technical summarization assistant.">You are an expert technical summarization assistant.</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="user-prompt-template">User Prompt Template <span class="label-hint">(use {engineering_note} placeholder)</span></label>
+                            <textarea id="user-prompt-template" rows="6" placeholder="You are a senior engineering lead...&#10;&#10;Engineering notes:&#10;{engineering_note}">You are a senior engineering program lead. Expand raw engineering notes into a high-quality summary report that is factual, concise, and decision-oriented. Do not invent facts.
+Prioritize clarity and technical correctness.
+Return two sections: 1) Executive Summary and 2) Structured Report with Context, Key Decisions, Risks, Open Questions, Action Items.
+
+Engineering notes:
+{engineering_note}</textarea>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card" aria-label="Evaluation and defaults">
+                    <div class="card-header">
+                        <h2>Evaluation Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="engineering-note">Engineering Note <span class="label-required">*</span></label>
+                            <div class="upload-row">
+                                <input type="file" id="eval-note-file" accept=".pdf,.md,.doc,.docx,.json,.xml,.txt">
+                                <button id="upload-eval-note-btn" class="btn btn-secondary" type="button">Upload Note File</button>
+                            </div>
+                            <div id="eval-upload-status" class="upload-status"></div>
+                            <div class="upload-row voice-row">
+                                <button id="eval-voice-btn" class="btn btn-secondary" type="button">Start Voice Input</button>
+                            </div>
+                            <div id="eval-voice-status" class="upload-status"></div>
+                            <textarea id="engineering-note" rows="6" placeholder="Paste your raw engineering notes here (minimum 20 characters)..."></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="reference-summary">Reference Summary <span class="label-hint">(required for evaluation scoring)</span></label>
+                            <textarea id="reference-summary" rows="4" placeholder="Paste the ground truth / reference summary here..."></textarea>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <h3 class="section-subheading">Evaluation Parameters</h3>
+                        <div class="form-row-3">
+                            <div class="form-group">
+                                <label for="mode">Output Mode</label>
+                                <select id="mode">
+                                    <option value="both">Both (Summary + Report)</option>
+                                    <option value="concise">Concise Only</option>
+                                    <option value="structured">Structured Only</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="prompt-variant">Prompt Variant</label>
+                                <select id="prompt-variant">
+                                    <option value="default">Default</option>
+                                    <option value="risk_focused">Risk Focused</option>
+                                    <option value="action_focused">Action Focused</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="temperature">Temperature</label>
+                                <input type="number" id="temperature" min="0" max="2" step="0.1" value="0.3">
+                            </div>
+                        </div>
+                        <div class="form-row-2">
+                            <div class="form-group">
+                                <label for="top-p">Top-p</label>
+                                <input type="number" id="top-p" min="0" max="1" step="0.05" value="0.95">
+                            </div>
+                            <div class="form-group">
+                                <label for="top-k">Top-k</label>
+                                <input type="number" id="top-k" min="1" value="40">
+                            </div>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <h3 class="section-subheading">Run Mode Defaults</h3>
+                        <div class="form-row-4">
+                            <div class="form-group">
+                                <label for="run-model">Run Model</label>
+                                <select id="run-model"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="run-temperature">Run Temperature</label>
+                                <input type="number" id="run-temperature" min="0" max="2" step="0.1" value="0.3">
+                            </div>
+                            <div class="form-group">
+                                <label for="run-top-p">Run Top-p</label>
+                                <input type="number" id="run-top-p" min="0" max="1" step="0.05" value="0.95">
+                            </div>
+                            <div class="form-group">
+                                <label for="run-top-k">Run Top-k</label>
+                                <input type="number" id="run-top-k" min="1" value="40">
+                            </div>
+                        </div>
+                        <div class="button-group compact-top">
+                            <button id="sync-run-defaults" class="btn btn-secondary" type="button">Use Current Eval Settings For Run Mode</button>
+                        </div>
+
+                        <div class="button-group">
+                            <button id="generate-btn" class="btn btn-primary">Generate For All Models</button>
+                            <button id="evaluate-btn" class="btn btn-secondary">Evaluate Against Ground Truth</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card" aria-label="Evaluation results">
+                    <div class="card-header">
+                        <h2>Results</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="results-toolbar">
+                            <div id="runtime-stats" class="runtime-stats">Stored rows: 0</div>
+                            <div class="button-group toolbar-buttons">
+                                <button id="refresh-runtime-btn" class="btn btn-secondary" type="button">Refresh Count</button>
+                                <button id="export-runtime-btn" class="btn btn-primary" type="button">Export To Excel</button>
+                                <button id="clear-runtime-btn" class="btn btn-secondary" type="button">Clear Stored Data</button>
+                            </div>
+                        </div>
+                        <div id="results-container">
+                            <p class="placeholder-text">Results will appear here after generation or evaluation.</p>
+                        </div>
+                    </div>
+                </section>
+            </section>
+
+            <section id="run-screen" class="hidden" aria-label="Run mode screen">
+                <section class="card">
+                    <div class="card-header">
+                        <h2>Run Mode</h2>
+                    </div>
+                    <div class="card-body">
+                        <p class="run-meta" id="run-meta">Model: - | Temp: - | Top-p: - | Top-k: -</p>
+                        <div class="run-layout run-layout-with-vision">
+                            <div class="run-pane">
+                                <label for="run-input">Engineering Notes</label>
+                                <div class="upload-row">
+                                    <input type="file" id="run-file"
+                                        accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.pdf,.doc,.docx,.pptx,.rtf,.xlsx,.csv,.tsv,.md,.txt,.log,.json,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.html,.htm,.svg,.mmd,.mermaid,.puml,.plantuml,.dot,.gv,.drawio">
+                                    <button id="upload-run-file-btn" class="btn btn-secondary" type="button">Upload File</button>
+                                    <button id="clear-run-file-btn" class="btn btn-secondary hidden" type="button">Clear Attachment</button>
+                                </div>
+                                <div id="run-upload-status" class="upload-status"></div>
+                                <div class="upload-row voice-row">
+                                    <button id="run-voice-btn" class="btn btn-secondary" type="button">Start Voice Input</button>
+                                </div>
+                                <div id="run-voice-status" class="upload-status"></div>
+                                <textarea id="run-input" class="run-box" placeholder="Paste engineering notes here..."></textarea>
+                            </div>
+                            <aside id="vision-panel" class="vision-panel hidden" aria-label="Image analysis panel">
+                                <div class="vision-panel-header">
+                                    <h3>Image Analysis</h3>
+                                    <button id="reanalyze-image-btn" class="btn btn-secondary btn-compact" type="button">Re-analyze</button>
+                                </div>
+                                <div class="vision-thumb-wrap">
+                                    <img id="vision-thumb" class="vision-thumb" alt="Attached image preview">
+                                </div>
+                                <dl class="vision-meta">
+                                    <div><dt>File</dt><dd id="vision-filename">—</dd></div>
+                                    <div><dt>Vision model</dt><dd id="vision-model">—</dd></div>
+                                    <div><dt>Image kind</dt><dd id="vision-kind">—</dd></div>
+                                    <div><dt>Analysis</dt><dd id="vision-richness">—</dd></div>
+                                    <div><dt>Routing reason</dt><dd id="vision-reason">—</dd></div>
+                                </dl>
+                                <div id="vision-passthrough-note" class="vision-passthrough hidden">
+                                    Selected text model supports vision natively — the image will be sent directly to it. The description below is optional context.
+                                </div>
+                                <label for="vision-description" class="vision-desc-label">
+                                    Description (editable — sent as supplementary context to your selected model)
+                                </label>
+                                <textarea id="vision-description" class="vision-description" placeholder="Vision model output will appear here..."></textarea>
+                            </aside>
+                            <div class="run-pane">
+                                <label for="run-output">Summarized Output</label>
+                                <textarea id="run-output" class="run-box" readonly placeholder="Summary output will appear here..."></textarea>
+                            </div>
+                        </div>
+                        <div class="button-group">
+                            <button id="run-summarize-btn" class="btn btn-primary">Summarize</button>
+                            <button id="run-download-pdf-btn" class="btn btn-secondary" type="button" disabled>Download PDF</button>
+                        </div>
+                        <div id="run-status" class="run-status"></div>
+                    </div>
+                </section>
+            </section>
+
+        </main>
+
+        <footer class="page-footer">
+            <p>NGNotes &mdash; Georgia Tech &middot; LLM-Powered Engineering Intelligence</p>
+        </footer>
+
+    </div>
+
+    <script src="app.js?v=20260623-4"></script>
+</body>
+</html>
