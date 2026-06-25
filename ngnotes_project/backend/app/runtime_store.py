@@ -10,6 +10,7 @@ from threading import Lock
 from typing import Any, Dict, List
 
 from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 
 
 class RuntimeStore:
@@ -49,12 +50,6 @@ class RuntimeStore:
         ws.title = "runtime_data"
 
         headers = [
-            "stored_at",
-            "endpoint",
-            "case_id",
-            "model",
-            "prompt_variant",
-            "mode",
             "temperature",
             "top_p",
             "min_p",
@@ -65,12 +60,10 @@ class RuntimeStore:
             "semantic_similarity",
             "composite_score",
             "rubric_total_score",
+            "hallucination_score",
+            "context_adherence",
+            "domain_fluency",
             "final_score",
-            "output_preview",
-            "engineering_note",
-            "reference_summary",
-            "system_prompt",
-            "user_prompt_template",
         ]
 
         ws.append(headers)
@@ -80,7 +73,8 @@ class RuntimeStore:
 
         # Light quality-of-life formatting.
         ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:V{max(2, len(rows) + 1)}"
+        last_col = get_column_letter(len(headers))
+        ws.auto_filter.ref = f"A1:{last_col}{max(2, len(rows) + 1)}"
 
         output = BytesIO()
         wb.save(output)

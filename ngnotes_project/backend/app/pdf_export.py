@@ -1,5 +1,5 @@
 """
-NGNotes: PDF report generation for summarized engineering notes.
+NGNotes: PDF report generation for summarized notes.
 
 Renders a Run-Mode generation into a formatted, professional-looking PDF using
 ReportLab Platypus. Understands a small subset of markdown emitted by the
@@ -183,7 +183,7 @@ def _make_page_decorator(report: PdfReport):
         # Header text
         canvas.setFillColor(GT_NAVY)
         canvas.setFont("Helvetica-Bold", 13)
-        canvas.drawString(0.75 * inch, height - 0.55 * inch, "NGNotes — Engineering Summary Report")
+        canvas.drawString(0.75 * inch, height - 0.55 * inch, "NGNotes — Notes Intelligence Report")
 
         canvas.setFillColor(GRAY_TEXT)
         canvas.setFont("Helvetica", 9)
@@ -222,7 +222,7 @@ def build_summary_pdf(report: PdfReport) -> bytes:
         rightMargin=0.75 * inch,
         topMargin=1.0 * inch,
         bottomMargin=0.75 * inch,
-        title="NGNotes Engineering Summary",
+        title="NGNotes Notes Intelligence Report",
         author="NGNotes",
     )
     frame = Frame(
@@ -258,7 +258,7 @@ def build_summary_pdf(report: PdfReport) -> bytes:
 
     if report.engineering_note and report.engineering_note.strip():
         flowables.append(PageBreak())
-        flowables.append(Paragraph("Source Engineering Notes", styles["h2"]))
+        flowables.append(Paragraph("Source Notes", styles["h2"]))
         flowables.extend(_render_markdown_block(report.engineering_note, styles))
 
     doc.build(flowables)
@@ -358,21 +358,36 @@ def build_eval_stats_pdf(total_rows: int, model_stats: list[dict]) -> bytes:
         for idx, item in enumerate(model_stats)
     }
 
-    table_data = [[
-        "Model", "Runs", "Scored", "Final Avg", "Composite Avg", "Semantic Avg", "ROUGE-L Avg"
-    ]]
-    for item in model_stats:
-        table_data.append([
-            Paragraph(_soft_wrap_model_name(str(item.get("model", "-"))), styles["body"]),
-            str(item.get("runs", 0)),
-            str(item.get("scored", 0)),
-            _fmt_metric(item.get("final_avg")),
-            _fmt_metric(item.get("composite_avg")),
-            _fmt_metric(item.get("semantic_avg")),
-            _fmt_metric(item.get("rouge_avg")),
-        ])
+    # ── Transposed table: metrics as rows, one column per model ──────────────
+    # Page usable width ≈ 504pt.  Metric-label col = 120pt; rest split equally.
+    n_models = max(1, len(model_stats))
+    model_col_w = max(48, int((504 - 120) / n_models))
 
-    col_widths = [188, 36, 40, 58, 64, 64, 58]
+    metric_rows = [
+        ("Runs",            [str(item.get("runs", 0))         for item in model_stats]),
+        ("Scored",          [str(item.get("scored", 0))       for item in model_stats]),
+        ("Final Avg",       [_fmt_metric(item.get("final_avg"))        for item in model_stats]),
+        ("Composite Avg",   [_fmt_metric(item.get("composite_avg"))    for item in model_stats]),
+        ("Groundedness",    [_fmt_metric(item.get("hallucination_avg"))for item in model_stats]),
+        ("Ctx Adherence",   [_fmt_metric(item.get("adherence_avg"))    for item in model_stats]),
+        ("Domain Fluency",  [_fmt_metric(item.get("fluency_avg"))      for item in model_stats]),
+        ("Semantic Avg",    [_fmt_metric(item.get("semantic_avg"))     for item in model_stats]),
+        ("ROUGE-L Avg",     [_fmt_metric(item.get("rouge_avg"))        for item in model_stats]),
+    ]
+
+    # Header row: blank label cell + short model labels
+    header_row = [Paragraph("<b>Metric</b>", styles["body"])] + [
+        Paragraph(f"<b>{short_label_map.get(str(item.get('model', '-')), '-')}</b>", styles["body"])
+        for item in model_stats
+    ]
+    table_data = [header_row]
+    for label, values in metric_rows:
+        row = [Paragraph(f"<b>{label}</b>", styles["body"])] + [
+            Paragraph(v, styles["body"]) for v in values
+        ]
+        table_data.append(row)
+
+    col_widths = [120] + [model_col_w] * n_models
     table = Table(table_data, repeatRows=1, colWidths=col_widths)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), GT_NAVY),
@@ -381,6 +396,7 @@ def build_eval_stats_pdf(total_rows: int, model_stats: list[dict]) -> bytes:
         ("FONTSIZE", (0, 0), (-1, 0), 8),
         ("FONTSIZE", (0, 1), (-1, -1), 7),
         ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+        ("ALIGN", (0, 0), (0, -1), "LEFT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F3F4F6")]),
         ("GRID", (0, 0), (-1, -1), 0.25, GRAY_BORDER),
@@ -394,6 +410,9 @@ def build_eval_stats_pdf(total_rows: int, model_stats: list[dict]) -> bytes:
     chart_specs = [
         ("final_avg", "Final Score", colors.HexColor("#1D4ED8")),
         ("composite_avg", "Composite Score", colors.HexColor("#047857")),
+        ("hallucination_avg", "Groundedness (Anti-Hallucination)", colors.HexColor("#DC2626")),
+        ("adherence_avg", "Instruction / Context Adherence", colors.HexColor("#D97706")),
+        ("fluency_avg", "Domain-Specific Fluency", colors.HexColor("#7C3AED")),
         ("semantic_avg", "Semantic Similarity", colors.HexColor("#B45309")),
         ("rouge_avg", "ROUGE-L F1", colors.HexColor("#6D28D9")),
     ]

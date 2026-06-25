@@ -58,6 +58,144 @@ class Evaluator:
         composite = 0.4 * rouge_l + 0.6 * (semantic + 1.0) / 2.0
         return float(max(0.0, min(1.0, composite)))
 
+    def compute_hallucination_score(self, note: str, candidate: str) -> float:
+        """
+        Groundedness score in [0, 1] — higher is better (less hallucination).
+        Measures fraction of candidate content-tokens (len > 4) that appear
+        in the source note, serving as a grounding proxy.
+        """
+        src_tokens = set(re.findall(r"\b\w+\b", note.lower()))
+        cand_tokens = [t for t in re.findall(r"\b\w+\b", candidate.lower()) if len(t) > 4]
+        if not cand_tokens:
+            return 1.0
+        grounded = sum(1 for t in cand_tokens if t in src_tokens)
+        return float(max(0.0, min(1.0, grounded / len(cand_tokens))))
+
+    def compute_context_adherence(self, note: str, prompt: str, candidate: str) -> float:
+        """
+        Measures how well the output adheres to the source context.
+        Combines: (a) overlap of top-30 source tokens in the output,
+        and (b) detection of expected structural sections from the prompt.
+        Returns [0, 1].
+        """
+        note_tokens = [t for t in re.findall(r"\b\w+\b", note.lower()) if len(t) > 3]
+        top_src = [t for t, _ in Counter(note_tokens).most_common(30)]
+        cand_lower = candidate.lower()
+        src_overlap = (sum(1 for t in top_src if t in cand_lower) / len(top_src)) if top_src else 0.0
+
+        instruction_keywords = [
+            "executive summary", "context", "key decisions", "risks",
+            "open questions", "action items", "background", "summary",
+        ]
+        detected = sum(1 for kw in instruction_keywords if kw in cand_lower)
+        instruction_score = min(1.0, detected / 3.0)
+
+        return float(max(0.0, min(1.0, 0.6 * src_overlap + 0.4 * instruction_score)))
+
+    def compute_domain_fluency(self, candidate: str) -> float:
+        """
+        Estimates domain-specific fluency for technical engineering writing.
+        Signals: technical vocabulary density, logical connectors, absence of hedging.
+        Returns [0, 1].
+        """
+        cand_lower = candidate.lower()
+
+        tech_terms = [
+            "architecture", "deploy", "latency", "throughput", "pipeline",
+            "api", "integration", "scalab", "redundan", "failover",
+            "monitoring", "service", "database", "authentication", "authoriz",
+            "kubernetes", "container", "microservice", "endpoint", "schema",
+            "performance", "security", "infrastructure", "implementation",
+        ]
+        tech_hit = sum(1 for t in tech_terms if t in cand_lower)
+        tech_score = min(1.0, tech_hit / 5.0)
+
+        connectors = [
+            "therefore", "however", "consequently", "as a result",
+            "furthermore", "in order to", "based on", "given that",
+        ]
+        conn_hit = sum(1 for c in connectors if c in cand_lower)
+        conn_score = min(1.0, conn_hit / 2.0)
+
+        hedges = ["i think", "maybe", "perhaps", "i believe", "probably", "not sure"]
+        hedge_count = sum(1 for h in hedges if h in cand_lower)
+        hedge_penalty = min(0.3, hedge_count * 0.1)
+
+        raw = 0.55 * tech_score + 0.30 * conn_score - hedge_penalty + 0.15
+        return float(max(0.0, min(1.0, raw)))
+
+    def compute_hallucination_rate(self, note: str, candidate: str) -> float:
+        """
+        Estimate hallucination rate as the fraction of candidate noun-phrases
+        (tokens > 4 chars) that do NOT appear in the source note.
+        Returns a score in [0, 1] where 1.0 = no hallucination, 0.0 = fully hallucinated.
+        """
+        src_tokens = set(re.findall(r"\b\w+\b", note.lower()))
+        cand_tokens = [t for t in re.findall(r"\b\w+\b", candidate.lower()) if len(t) > 4]
+        if not cand_tokens:
+            return 1.0
+        grounded = sum(1 for t in cand_tokens if t in src_tokens)
+        return float(max(0.0, min(1.0, grounded / len(cand_tokens))))
+
+    def compute_context_adherence(self, note: str, prompt: str, candidate: str) -> float:
+        """
+        Measures how well the output adheres to the source context.
+        Combines: (a) instruction keyword coverage from the rendered prompt,
+        and (b) overlap of the top-30 source tokens in the output.
+        Returns [0, 1].
+        """
+        # Source token overlap (top-30 content words)
+        note_tokens = [t for t in re.findall(r"\b\w+\b", note.lower()) if len(t) > 3]
+        top_src = [t for t, _ in Counter(note_tokens).most_common(30)]
+        cand_lower = candidate.lower()
+        src_overlap = (sum(1 for t in top_src if t in cand_lower) / len(top_src)) if top_src else 0.0
+
+        # Instruction adherence: expected structural directives from prompt
+        instruction_keywords = [
+            "executive summary", "context", "key decisions", "risks",
+            "open questions", "action items", "background", "summary",
+        ]
+        detected = sum(1 for kw in instruction_keywords if kw in cand_lower)
+        instruction_score = min(1.0, detected / 3.0)
+
+        return float(max(0.0, min(1.0, 0.6 * src_overlap + 0.4 * instruction_score)))
+
+    def compute_domain_fluency(self, candidate: str) -> float:
+        """
+        Estimates domain-specific fluency for technical engineering writing.
+        Signals: presence of technical vocabulary, structured section markers,
+        logical connectors, and absence of filler/hedging language.
+        Returns [0, 1].
+        """
+        cand_lower = candidate.lower()
+
+        # Technical vocabulary (engineering / software domain)
+        tech_terms = [
+            "architecture", "deploy", "latency", "throughput", "pipeline",
+            "api", "integration", "scalab", "redundan", "failover",
+            "monitoring", "service", "database", "authentication", "authoriz",
+            "kubernetes", "container", "microservice", "endpoint", "schema",
+            "performance", "security", "infrastructure", "implementation",
+        ]
+        tech_hit = sum(1 for t in tech_terms if t in cand_lower)
+        tech_score = min(1.0, tech_hit / 5.0)
+
+        # Logical connectors (signal coherent argumentation)
+        connectors = [
+            "therefore", "however", "consequently", "as a result",
+            "furthermore", "in order to", "based on", "given that",
+        ]
+        conn_hit = sum(1 for c in connectors if c in cand_lower)
+        conn_score = min(1.0, conn_hit / 2.0)
+
+        # Penalise hedging / vague filler
+        hedges = ["i think", "maybe", "perhaps", "i believe", "probably", "not sure"]
+        hedge_count = sum(1 for h in hedges if h in cand_lower)
+        hedge_penalty = min(0.3, hedge_count * 0.1)
+
+        raw = 0.55 * tech_score + 0.30 * conn_score - hedge_penalty + 0.15
+        return float(max(0.0, min(1.0, raw)))
+
     def compute_rubric(
         self,
         note: str,
@@ -190,7 +328,7 @@ class Evaluator:
                                             )
                                             all_results.append(result)
 
-        # Sort by final_score descending; unscored/error runs go last.
+        # Sort by final_score descending; unscored/error runs go last (unchanged)
         all_results.sort(
             key=lambda r: r.final_score if r.final_score is not None else -1.0,
             reverse=True,
@@ -286,6 +424,9 @@ class Evaluator:
         composite: Optional[float] = None
         rubric_scores: Optional[Dict[str, float]] = None
         rubric_total: Optional[float] = None
+        hallucination_score: Optional[float] = None
+        context_adherence: Optional[float] = None
+        domain_fluency: Optional[float] = None
         final_score: Optional[float] = None
 
         if output and not output.startswith("[ERROR"):
@@ -296,6 +437,14 @@ class Evaluator:
                 )
                 composite = self.compute_composite(rouge_l, semantic)
 
+                hallucination_score = self.compute_hallucination_score(
+                    case.engineering_note, output
+                )
+                context_adherence = self.compute_context_adherence(
+                    case.engineering_note, prompt, output
+                )
+                domain_fluency = self.compute_domain_fluency(output)
+
                 if rubric.enabled:
                     rubric_scores, rubric_total = self.compute_rubric(
                         note=case.engineering_note,
@@ -305,9 +454,22 @@ class Evaluator:
                         semantic=semantic,
                         weights=rubric.weights,
                     )
-                    final_score = rubric_total
+                    # Blend rubric with the three precision metrics.
+                    # Weights: rubric 55%, hallucination 20%, adherence 15%, fluency 10%
+                    final_score = float(
+                        0.55 * rubric_total
+                        + 0.20 * hallucination_score
+                        + 0.15 * context_adherence
+                        + 0.10 * domain_fluency
+                    )
                 else:
-                    final_score = composite
+                    # Without rubric: composite 55%, hallucination 20%, adherence 15%, fluency 10%
+                    final_score = float(
+                        0.55 * composite
+                        + 0.20 * hallucination_score
+                        + 0.15 * context_adherence
+                        + 0.10 * domain_fluency
+                    )
             except Exception:
                 pass
 
@@ -330,6 +492,9 @@ class Evaluator:
             composite_score=composite,
             rubric_scores=rubric_scores,
             rubric_total_score=rubric_total,
+            hallucination_score=hallucination_score,
+            context_adherence=context_adherence,
+            domain_fluency=domain_fluency,
             final_score=final_score,
             output_preview=preview,
         )

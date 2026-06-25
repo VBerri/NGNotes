@@ -1,12 +1,15 @@
 """
-NGNotes: FastAPI Backend for Engineering Notes to Report Conversion
+NGNotes: FastAPI Backend for Notes-to-Report Conversion
 """
 
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 import uvicorn
 import os
+import re
+import subprocess
 from datetime import datetime
 
 from .config import settings
@@ -20,6 +23,11 @@ from .schemas import (
     AnalyzeImageResponse,
     ModelCapability,
     ExportPdfRequest,
+    OllamaRecommendResponse,
+    OllamaRecommendationItem,
+    ModelRecommendedParams,
+    OllamaInstallRequest,
+    OllamaInstallResponse,
 )
 from .llm_client import LLMClient
 from .prompting import PromptRenderer
@@ -31,7 +39,7 @@ from .pdf_export import PdfReport, build_summary_pdf, build_eval_stats_pdf
 
 app = FastAPI(
     title="NGNotes API",
-    description="Engineering Notes to Report Conversion with Multi-Model Evaluation",
+    description="Notes intelligence platform with multi-model evaluation",
     version="1.0.0"
 )
 
@@ -73,6 +81,162 @@ async def get_default_models():
         for name, caps in caps_map.items()
     }
     return DefaultModelsResponse(models=models, model_capabilities=model_capabilities)
+
+
+def _extract_model_size_b(name: str) -> int | None:
+    m = re.search(r"(\d+)\s*b\b", (name or "").lower())
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _recommended_max_b(cores: int, memory_gb: int, platform: str) -> int:
+    is_windows = "win" in (platform or "").lower()
+    if memory_gb <= 8 or cores <= 4:
+        return 7
+    if memory_gb <= 16 or cores <= 8:
+        return 14 if is_windows else 16
+    return 32
+
+
+def _recommended_params_for_model(name: str, size_b: int | None) -> ModelRecommendedParams:
+    """Return conservative generation defaults tuned by model size tier."""
+    if size_b is None:
+        return ModelRecommendedParams(
+            temperature=0.3,
+            top_p=0.92,
+            min_p=0.04,
+            top_k=40,
+            max_tokens=900,
+            repetition_penalty=1.03,
+        )
+    if size_b <= 7:
+        return ModelRecommendedParams(
+            temperature=0.35,
+            top_p=0.94,
+            min_p=0.05,
+            top_k=50,
+            max_tokens=700,
+            repetition_penalty=1.05,
+        )
+    if size_b <= 14:
+        return ModelRecommendedParams(
+            temperature=0.3,
+            top_p=0.92,
+            min_p=0.04,
+            top_k=40,
+            max_tokens=900,
+            repetition_penalty=1.03,
+        )
+    return ModelRecommendedParams(
+        temperature=0.25,
+        top_p=0.9,
+        min_p=0.03,
+        top_k=32,
+        max_tokens=1200,
+        repetition_penalty=1.01,
+    )
+
+
+@app.get("/api/ollama/recommend", response_model=OllamaRecommendResponse)
+async def ollama_recommend_models(
+    cores: int = 4,
+    memory_gb: int = 8,
+    platform: str = "unknown",
+):
+    """Recommend Ollama models for detected hardware and suggest install candidates."""
+    installed = await llm_client.list_available_models()
+    installed_set = set(installed)
+    max_b = _recommended_max_b(cores=cores, memory_gb=memory_gb, platform=platform)
+
+    recommended_installed: list[OllamaRecommendationItem] = []
+    for name in installed:
+        size_b = _extract_model_size_b(name)
+        if size_b is not None and size_b <= max_b:
+            recommended_installed.append(
+                OllamaRecommendationItem(
+                    name=name,
+                    size_b=size_b,
+                    installed=True,
+                    recommended_params=_recommended_params_for_model(name=name, size_b=size_b),
+                )
+            )
+
+    # Curated installable suggestions (safe defaults)
+    curated = [
+        "qwen2.5:7b",
+        "mistral:7b",
+        "phi4:14b",
+        "qwen2.5:14b",
+        "llama3.1:8b",
+        "gemma2:9b",
+    ]
+    install_candidates: list[OllamaRecommendationItem] = []
+    for name in curated:
+        size_b = _extract_model_size_b(name)
+        if size_b is None or size_b > max_b:
+            continue
+        if name in installed_set:
+            continue
+        install_candidates.append(
+            OllamaRecommendationItem(
+                name=name,
+                size_b=size_b,
+                installed=False,
+                recommended_params=_recommended_params_for_model(name=name, size_b=size_b),
+            )
+        )
+
+    if not recommended_installed and installed:
+        # Fallback: show first installed models if sizes are unknown.
+        recommended_installed = [
+            OllamaRecommendationItem(
+                name=n,
+                size_b=None,
+                installed=True,
+                recommended_params=_recommended_params_for_model(name=n, size_b=None),
+            )
+            for n in installed[:2]
+        ]
+
+    profile = f"{cores} CPU threads, ~{memory_gb} GB memory, {platform}"
+    return OllamaRecommendResponse(
+        hardware_profile=profile,
+        recommended_max_b=max_b,
+        recommended_models=recommended_installed,
+        install_candidates=install_candidates,
+    )
+
+
+@app.post("/api/ollama/install", response_model=OllamaInstallResponse)
+async def ollama_install_model(request: OllamaInstallRequest):
+    """Install an Ollama model via `ollama pull` (requires Ollama CLI installed)."""
+    model = (request.model or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["ollama", "pull", model],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Ollama CLI not found. Install Ollama first.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to launch install: {e}")
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "Unknown ollama error").strip()
+        raise HTTPException(status_code=500, detail=f"Model install failed: {detail}")
+
+    llm_client.invalidate_capabilities_cache()
+    return OllamaInstallResponse(status="ok", model=model, detail="Model installed successfully")
 
 
 @app.post("/api/extract-note-file")
@@ -296,6 +460,9 @@ async def evaluate_summary(request: EvaluateRequest):
                     "semantic_similarity": r.semantic_similarity,
                     "composite_score": r.composite_score,
                     "rubric_total_score": r.rubric_total_score,
+                    "hallucination_score": r.hallucination_score,
+                    "context_adherence": r.context_adherence,
+                    "domain_fluency": r.domain_fluency,
                     "final_score": r.final_score,
                     "output_preview": r.output_preview,
                     "engineering_note": case.engineering_note if case else "",
@@ -355,6 +522,7 @@ async def export_eval_report_pdf(model: str | None = None):
     stats: dict = defaultdict(lambda: {
         "runs": 0, "scored": 0,
         "rouge_l": [], "semantic": [], "composite": [], "final": [],
+        "hallucination": [], "adherence": [], "fluency": [],
         "variants": set(), "temps": set(), "modes": set(),
     })
 
@@ -372,6 +540,9 @@ async def export_eval_report_pdf(model: str | None = None):
             ("semantic", "semantic_similarity"),
             ("composite", "composite_score"),
             ("final", "final_score"),
+            ("hallucination", "hallucination_score"),
+            ("adherence", "context_adherence"),
+            ("fluency", "domain_fluency"),
         ]:
             v = row.get(key)
             if v is not None:
@@ -402,6 +573,9 @@ async def export_eval_report_pdf(model: str | None = None):
                 "composite_avg": _avg(s["composite"]),
                 "final_avg": _avg(s["final"]),
                 "final_best": _max(s["final"]),
+                "hallucination_avg": _avg(s["hallucination"]),
+                "adherence_avg": _avg(s["adherence"]),
+                "fluency_avg": _avg(s["fluency"]),
                 "variants": ", ".join(sorted(str(v) for v in s["variants"])) or "-",
                 "modes": ", ".join(sorted(str(v) for v in s["modes"])) or "-",
                 "temperatures": ", ".join(sorted(str(t) for t in s["temps"])) or "-",

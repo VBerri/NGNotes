@@ -123,6 +123,39 @@ class DefaultModelsResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
 
+
+class ModelRecommendedParams(BaseModel):
+    temperature: float
+    top_p: float
+    min_p: float
+    top_k: int
+    max_tokens: int
+    repetition_penalty: float
+
+
+class OllamaRecommendationItem(BaseModel):
+    name: str
+    size_b: Optional[int] = None
+    installed: bool = False
+    recommended_params: ModelRecommendedParams
+
+
+class OllamaRecommendResponse(BaseModel):
+    hardware_profile: str
+    recommended_max_b: int
+    recommended_models: List[OllamaRecommendationItem]
+    install_candidates: List[OllamaRecommendationItem]
+
+
+class OllamaInstallRequest(BaseModel):
+    model: str
+
+
+class OllamaInstallResponse(BaseModel):
+    status: str
+    model: str
+    detail: str
+
 class EvalRunResult(BaseModel):
     case_id: str
     model: str
@@ -138,6 +171,9 @@ class EvalRunResult(BaseModel):
     composite_score: Optional[float]
     rubric_scores: Optional[Dict[str, float]]
     rubric_total_score: Optional[float]
+    hallucination_score: Optional[float]
+    context_adherence: Optional[float]
+    domain_fluency: Optional[float]
     final_score: Optional[float]
     output_preview: str
 

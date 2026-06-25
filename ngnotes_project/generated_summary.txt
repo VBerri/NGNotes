@@ -1,7 +1,0 @@
-Summary generated with gpt-3.5-turbo: 
-Engineering Notes - Project Alpha
-    
-1. Feature Implementation
-   - Implemented user authentication system
-   - Added password reset functionality
-   - Integrated with OAuth providers (Google, GitH... (truncated)

@@ -9,11 +9,11 @@ class PromptRenderer:
     """Handles prompt template rendering for different modes and variants"""
     
     def __init__(self):
-        self.default_system_prompt = "You are an expert technical summarization assistant."
+        self.default_system_prompt = "You are an expert note-to-report assistant."
 
         # Base instruction for all prompts
         self.base_instruction = (
-            "You are a senior engineering program lead. Expand raw engineering notes into a high-quality summary report "
+            "You are a senior reporting lead. Expand raw notes into a high-quality report "
             "that is factual, concise, and decision-oriented. Do not invent facts."
         )
         
@@ -55,7 +55,7 @@ class PromptRenderer:
             template = user_prompt_template.strip()
             if "{engineering_note}" in template:
                 return template.replace("{engineering_note}", engineering_note)
-            return f"{template}\n\nEngineering notes:\n{engineering_note}"
+            return f"{template}\n\nSource notes:\n{engineering_note}"
         
         # Build the prompt
         prompt_parts = [
@@ -63,7 +63,7 @@ class PromptRenderer:
             self.variants[prompt_variant],
             self.mode_instructions[mode],
             "",
-            "Engineering notes:",
+            "Source notes:",
             engineering_note
         ]
         
