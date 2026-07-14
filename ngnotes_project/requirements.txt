@@ -1,18 +1,1 @@
-# NGNotes requirements
-
-# Core dependencies
-python>=3.7
-
-# For LLM interactions (example)
-openai>=0.27.0
-anthropic>=0.3.0
-
-# For text processing
-nltk>=3.8.1
-rouge-score>=0.0.4
-
-# For CLI argument parsing
-argparse>=1.4.0
-
-# For data handling
-dataclasses>=0.6
+-r backend/requirements.txt

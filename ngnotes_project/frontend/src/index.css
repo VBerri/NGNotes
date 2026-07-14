@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+@theme {
+  /* NGNotes brand palette (Georgia Tech Navy Blue + Tech Gold) */
+  --color-brand-blue-50: #eef3f8;
+  --color-brand-blue-100: #dce7f0;
+  --color-brand-blue-200: #b9cfe0;
+  --color-brand-blue-300: #8fb0cb;
+  --color-brand-blue-400: #4d769e;
+  --color-brand-blue-500: #0a4478;
+  --color-brand-blue-600: #003057;
+  --color-brand-blue-700: #00264a;
+  --color-brand-blue-800: #001c38;
+  --color-brand-blue-900: #001325;
+
+  --color-brand-gold-50: #faf7ef;
+  --color-brand-gold-100: #f3ecd8;
+  --color-brand-gold-200: #e6d9ae;
+  --color-brand-gold-300: #d3bf82;
+  --color-brand-gold-400: #c0ac6f;
+  --color-brand-gold-500: #b3a369;
+  --color-brand-gold-600: #9c8f57;
+  --color-brand-gold-700: #7d7245;
+  --color-brand-gold-800: #5e5634;
+  --color-brand-gold-900: #403b23;
+}
+
+html, body, #root {
+  margin: 0;
+  width: 100%;
+  min-height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Single unified contentEditable region for the whole report (title through
+   final section) — replaces the old per-field editable regions. */
+.ngn-doc-article {
+  outline: none;
+}
+.ngn-doc-article:focus {
+  box-shadow: 0 0 0 2px rgba(10, 68, 120, 0.25);
+}
+
+/* Rich-text content styling (abstract/section/fallback bodies). */
+.ngn-rich-content {
+  outline: none;
+}
+.ngn-rich-content p {
+  margin-top: 0.75rem;
+  font-size: 15px;
+  line-height: 1.75rem;
+  color: #1e293b;
+}
+.ngn-rich-content p:first-child {
+  margin-top: 0;
+}
+.ngn-rich-content h4 {
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #334155;
+}
+.ngn-rich-content ul,
+.ngn-rich-content ol {
+  margin-top: 0.75rem;
+  padding-left: 1.25rem;
+  font-size: 15px;
+  line-height: 1.75rem;
+  color: #1e293b;
+}
+.ngn-rich-content ul {
+  list-style-type: disc;
+}
+.ngn-rich-content ol {
+  list-style-type: decimal;
+}
+.ngn-rich-content li {
+  margin-top: 0.375rem;
+}
+.ngn-rich-content table {
+  margin-top: 1rem;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.ngn-rich-content tr:first-child {
+  background: #f8fafc;
+  font-weight: 600;
+}
+.ngn-rich-content tr:not(:first-child) {
+  border-top: 1px solid #e2e8f0;
+}
+.ngn-rich-content td {
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+}
+.ngn-rich-content pre {
+  margin-top: 0.75rem;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: #0f172a;
+  color: #f1f5f9;
+  padding: 0.75rem;
+  font-size: 13px;
+  line-height: 1.5rem;
+}
+.ngn-rich-content code {
+  border-radius: 0.25rem;
+  background: #f1f5f9;
+  padding: 0.125rem 0.25rem;
+  font-size: 13px;
+  color: #1e293b;
+}
+.ngn-rich-content pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+.ngn-rich-content .ngn-math {
+  display: inline-block;
+}
+.ngn-rich-content mark {
+  background: var(--color-brand-gold-200);
+  color: inherit;
+  border-radius: 0.15rem;
+  padding: 0 0.1rem;
+}
+.ngn-rich-content sup,
+.ngn-rich-content sub {
+  font-size: 75%;
+}
+.ngn-rich-content blockquote {
+  margin: 0.75rem 0;
+  padding: 0.25rem 0 0.25rem 0.9rem;
+  border-left: 3px solid var(--color-brand-blue-300);
+  color: #475569;
+  font-style: italic;
+}
+.ngn-rich-content s,
+.ngn-rich-content del {
+  color: #94a3b8;
+}
+.ngn-rich-content table td {
+  border: 1px solid #e2e8f0;
+}

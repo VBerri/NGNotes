@@ -1,98 +1,81 @@
-# NGNotes: Engineering Notes to Report Converter
+# NGNotes
 
-NGNotes is a tool that converts engineering notes into professional reports using various language models.
+NGNotes turns rough engineering notes — typed text, voice transcripts, and photos of whiteboards or drawings — into a polished, publication-style LaTeX report, compiled to PDF. It runs entirely on your own machine against a local [Ollama](https://ollama.com) model; nothing is sent to an external service.
 
-## Features
+For how to actually *use* the app once it's running, see **[USER_GUIDE.md](USER_GUIDE.md)**.
 
-- Support for multiple language models (GPT-3.5, GPT-4, Claude, Llama)
-- Parameter sweep and model comparison
-- Flexible input/output handling
-- Evaluation metrics for generated summaries
-- Command-line interface for easy usage
+## Quick start (macOS)
 
-## Installation
+1. Install [Ollama](https://ollama.com/download) and pull a model: `ollama pull qwen3.6`
+2. Double-click **`setup.command`** — installs everything the project needs and checks for Ollama/pdflatex.
+3. Double-click **`start.command`** — launches the app and opens it in your browser.
 
-```bash
-# Clone the repository
-git clone <repository-url>
-cd ngnotes_project
+That's it. Keep the terminal window `start.command` opens running while you use the app; close it (or press Ctrl+C) to stop.
 
-# Install dependencies (if any)
-pip install -r requirements.txt
-```
+## What you need installed
 
-## Usage
+| Tool | Why | Get it |
+|---|---|---|
+| Python 3.10+ | Runs the backend | [python.org](https://www.python.org/downloads/) |
+| Node.js (LTS) | Runs the frontend | [nodejs.org](https://nodejs.org) |
+| [Ollama](https://ollama.com) | Runs the LLM locally | `ollama pull qwen3.6` (or any model you prefer) |
+| pdflatex | Compiles reports to PDF | [TinyTeX](https://yihui.org/tinytex/) (lightweight) or [MacTeX](https://tug.org/mactex/) (full) |
 
-### Basic usage
+`setup.command` checks for all four and tells you exactly what's missing — it won't silently install system-level tools for you.
 
-```bash
-python src/main.py --input notes.txt --output summary.txt
-```
+## Manual setup
 
-### Using a specific model
+If you'd rather not use the `.command` scripts:
 
 ```bash
-python src/main.py --input notes.txt --output summary.txt --model gpt-4
+# Backend
+cd backend
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+./.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
+
+# Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-### Comparing results from multiple models
+Then open `http://127.0.0.1:5173`.
+
+## Running tests
 
 ```bash
-python src/main.py --input notes.txt --output summary.txt --compare
+# Backend (pytest — compiles real LaTeX via pdflatex, not mocked)
+cd backend
+./.venv/bin/pip install -r requirements-dev.txt
+./.venv/bin/python -m pytest tests/ -v
+
+# Frontend (Vitest)
+cd frontend
+npm test
 ```
 
-## Input Format
+## Project structure
 
-The input file should contain engineering notes in plain text format. The tool will process the content and generate a structured summary.
-
-## Output Format
-
-The output is a formatted summary report that can be used for documentation, presentations, or further processing.
-
-## Example Usage
-
-You can also run the example script to see how the tool works:
-
-```bash
-python example_usage.py
+```
+backend/
+  app/main.py        FastAPI backend: Ollama integration, LaTeX sanitize/
+                      escape/compile pipeline, image analysis, template CRUD
+  app/schemas.py      Request/response models
+  tests/              pytest suite
+frontend/
+  src/App.jsx          React app: source-input blocks, rich-text LaTeX editor,
+                        advanced sampler panel + presets, template management
+  src/App.test.jsx     Vitest suite
+templates/
+  report_frameworks/  Curated report templates (IEEE / Patient Care / Monthly)
+                       plus any templates you save from the app
+setup.command          One-time setup (double-click)
+start.command           Launch both servers (double-click)
 ```
 
-This will create sample notes, process them with different models, and generate a comparison of results.
+## Key behavior
 
-## Project Structure
-
-- `src/` - Source code directory
-  - `converter.py` - Core conversion logic
-  - `models.py` - Data structures and model configurations
-  - `evaluation.py` - Summary evaluation logic
-  - `main.py` - Main command-line interface
-- `tests/` - Unit tests
-- `example_usage.py` - Example usage script
-
-## Supported Models
-
-The tool currently supports:
-- GPT-3.5 Turbo (OpenAI)
-- GPT-4 (OpenAI) 
-- Claude 2 (Anthropic)
-- Llama 2 7B (Hugging Face)
-
-## Testing
-
-To run the unit tests:
-
-```bash
-python -m pytest tests/test_converter.py -v
-```
-
-## License
-
-This project is licensed under the MIT License.
-
-## Configuration
-
-Model configurations are defined in `src/models.py`. You can modify these to adjust parameters like temperature and top_p for different models.
-
-## License
-
-MIT License
+- `/api/generate` always returns LaTeX body content — no markdown mode.
+- `/api/export-pdf` compiles that LaTeX with `pdflatex`, auto-retrying once through an LLM edit pass if compilation fails.
+- Every structural element (title, author, date, abstract, each section) is optional and reflects only what was actually generated — nothing is fabricated to fill a gap.

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Environment
+.env
+.env.local
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+
+# OS
+.DS_Store
+
+# MS Office lock files (e.g. "~$nthly Report Template.docx")
+~$*
