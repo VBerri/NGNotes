@@ -1,4 +1,8 @@
+import io
+import sys
+
 import pytest
+from docx import Document as DocxDocument
 from fastapi.testclient import TestClient
 
 from app.main import (
@@ -9,6 +13,7 @@ from app.main import (
     _escape_stray_ampersands,
     _escape_stray_latex_specials,
     _extract_latex_error_detail,
+    _extract_office_text,
     _extract_title,
     _has_unbalanced_braces,
     _latex_escape,
@@ -423,6 +428,43 @@ class TestCompileLatexPdf:
         )
         pdf_bytes = _compile_latex_pdf(body)
         assert pdf_bytes[:4] == b"%PDF"
+
+
+# ---------------------------------------------------------------------------
+# _extract_office_text (cross-platform .docx/.rtf/.doc extraction)
+# ---------------------------------------------------------------------------
+
+def _make_docx_bytes(paragraphs):
+    doc = DocxDocument()
+    for p in paragraphs:
+        doc.add_paragraph(p)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+class TestExtractOfficeText:
+    def test_docx_extracts_paragraph_text(self):
+        data = _make_docx_bytes(["Section One", "Some body content here."])
+        text = _extract_office_text(data, ".docx")
+        assert "Section One" in text
+        assert "Some body content here." in text
+
+    def test_rtf_extracts_plain_text(self):
+        rtf = rb"{\rtf1\ansi\deff0 {\fonttbl{\f0 Times New Roman;}} \f0\pard This is \b bold\b0  RTF text.\par}"
+        text = _extract_office_text(rtf, ".rtf")
+        assert "This is" in text
+        assert "bold" in text
+        assert "RTF text." in text
+
+    def test_unsupported_suffix_raises(self):
+        with pytest.raises(ValueError):
+            _extract_office_text(b"whatever", ".xyz")
+
+    @pytest.mark.skipif(sys.platform == "darwin", reason="macOS has a textutil fallback for legacy .doc")
+    def test_doc_unsupported_off_macos_raises_actionable_error(self):
+        with pytest.raises(RuntimeError, match="save as .docx"):
+            _extract_office_text(b"not a real doc file", ".doc")
 
 
 # ---------------------------------------------------------------------------

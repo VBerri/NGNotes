@@ -4,37 +4,53 @@ NGNotes turns rough engineering notes — typed text, voice transcripts, and pho
 
 For how to actually *use* the app once it's running, see **[USER_GUIDE.md](USER_GUIDE.md)**.
 
-## Quick start (macOS)
+## Quick start
 
+**macOS:**
 1. Install [Ollama](https://ollama.com/download) and pull a model: `ollama pull qwen3.6`
 2. Double-click **`setup.command`** — installs everything the project needs and checks for Ollama/pdflatex.
 3. Double-click **`start.command`** — launches the app and opens it in your browser.
 
-That's it. Keep the terminal window `start.command` opens running while you use the app; close it (or press Ctrl+C) to stop.
+Keep the terminal window `start.command` opens running while you use the app; close it (or press Ctrl+C) to stop.
+
+**Windows:**
+1. Install [Ollama](https://ollama.com/download) and pull a model: `ollama pull qwen3.6`
+2. Double-click **`setup.bat`** — installs everything the project needs and checks for Ollama/pdflatex.
+3. Double-click **`start.bat`** — launches the app (in two windows, titled "NGNotes Backend" and "NGNotes Frontend") and opens it in your browser.
+
+Closing either of those two windows stops that server.
 
 ## What you need installed
 
 | Tool | Why | Get it |
 |---|---|---|
-| Python 3.10+ | Runs the backend | [python.org](https://www.python.org/downloads/) |
+| Python 3.10+ | Runs the backend | [python.org](https://www.python.org/downloads/) — **not** the Microsoft Store version on Windows; check "Add python.exe to PATH" during install |
 | Node.js (LTS) | Runs the frontend | [nodejs.org](https://nodejs.org) |
 | [Ollama](https://ollama.com) | Runs the LLM locally | `ollama pull qwen3.6` (or any model you prefer) |
-| pdflatex | Compiles reports to PDF | [TinyTeX](https://yihui.org/tinytex/) (lightweight) or [MacTeX](https://tug.org/mactex/) (full) |
+| pdflatex | Compiles reports to PDF | macOS: [TinyTeX](https://yihui.org/tinytex/) or [MacTeX](https://tug.org/mactex/) &nbsp;·&nbsp; Windows: [MiKTeX](https://miktex.org/download) |
 
-`setup.command` checks for all four and tells you exactly what's missing — it won't silently install system-level tools for you.
+`setup.command`/`setup.bat` check for all four and tell you exactly what's missing — they won't silently install system-level tools for you.
+
+**MiKTeX note (Windows only):** after installing, open MiKTeX Console and set "Install missing packages on-the-fly" to Yes/Always — otherwise your first PDF export can hang behind a hidden confirmation dialog the first time it needs a package.
 
 ## Manual setup
 
-If you'd rather not use the `.command` scripts:
+If you'd rather not use the setup/start scripts:
 
 ```bash
-# Backend
+# Backend (macOS/Linux)
 cd backend
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
 ./.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 
-# Frontend (separate terminal)
+# Backend (Windows)
+cd backend
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
+
+# Frontend (separate terminal, same on all platforms)
 cd frontend
 npm install
 npm run dev -- --host 127.0.0.1 --port 5173
@@ -45,12 +61,17 @@ Then open `http://127.0.0.1:5173`.
 ## Running tests
 
 ```bash
-# Backend (pytest — compiles real LaTeX via pdflatex, not mocked)
+# Backend (macOS/Linux) — pytest, compiles real LaTeX via pdflatex, not mocked
 cd backend
 ./.venv/bin/pip install -r requirements-dev.txt
 ./.venv/bin/python -m pytest tests/ -v
 
-# Frontend (Vitest)
+# Backend (Windows)
+cd backend
+.venv\Scripts\python -m pip install -r requirements-dev.txt
+.venv\Scripts\python -m pytest tests/ -v
+
+# Frontend (Vitest, same on all platforms)
 cd frontend
 npm test
 ```
@@ -70,8 +91,8 @@ frontend/
 templates/
   report_frameworks/  Curated report templates (IEEE / Patient Care / Monthly)
                        plus any templates you save from the app
-setup.command          One-time setup (double-click)
-start.command           Launch both servers (double-click)
+setup.command / setup.bat   One-time setup (double-click) — macOS / Windows
+start.command  / start.bat  Launch both servers (double-click) — macOS / Windows
 ```
 
 ## Key behavior

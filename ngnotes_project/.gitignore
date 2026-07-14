@@ -22,6 +22,8 @@ frontend/.vite/
 
 # OS
 .DS_Store
+Thumbs.db
+desktop.ini
 
 # MS Office lock files (e.g. "~$nthly Report Template.docx")
 ~$*

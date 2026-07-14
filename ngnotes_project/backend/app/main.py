@@ -5,6 +5,7 @@ import base64
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unicodedata
 from datetime import datetime
@@ -12,11 +13,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
+from docx import Document as DocxDocument
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from PIL import Image, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 from pypdf import PdfReader
+from striprtf.striprtf import rtf_to_text
+
+# Registers HEIC/HEIF support with Pillow's Image.open so _image_data_to_ollama_b64
+# can decode it directly on every platform, instead of shelling out to macOS's
+# `sips` (which doesn't exist on Windows/Linux).
+register_heif_opener()
 
 from .schemas import (
     ExportPdfRequest,
@@ -259,18 +268,43 @@ def _de_latexify_uploaded_text(text: str) -> str:
     return _clean_extracted_text(src)
 
 
+def _extract_office_text(data: bytes, suffix: str) -> str:
+    """Extract plain text from .docx/.rtf/.doc bytes, cross-platform.
+
+    .docx and .rtf use pure-Python libraries (python-docx, striprtf) that
+    behave identically on macOS/Linux/Windows. Legacy binary .doc has no
+    reliable pure-Python reader, so it falls back to macOS's `textutil` where
+    available and is otherwise unsupported (raises, telling the caller to ask
+    for .docx instead) rather than silently producing garbage.
+    """
+    suffix = suffix.lower()
+    if suffix == ".docx":
+        doc = DocxDocument(io.BytesIO(data))
+        return "\n".join(p.text for p in doc.paragraphs)
+    if suffix == ".rtf":
+        return rtf_to_text(data.decode("latin-1", errors="ignore"))
+    if suffix == ".doc":
+        if sys.platform == "darwin":
+            with tempfile.TemporaryDirectory(prefix="ngnotes_doc_") as tmpdir:
+                in_path = Path(tmpdir) / "input.doc"
+                in_path.write_bytes(data)
+                proc = subprocess.run(
+                    ["textutil", "-convert", "txt", "-stdout", str(in_path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if proc.returncode == 0:
+                    return proc.stdout
+            raise RuntimeError("Unable to parse legacy .doc file")
+        raise RuntimeError("Legacy .doc files aren't supported on this platform — please save as .docx instead")
+    raise ValueError(f"Unsupported office document suffix: {suffix}")
+
+
 def _extract_template_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in {".doc", ".docx", ".rtf"}:
-        proc = subprocess.run(
-            ["textutil", "-convert", "txt", "-stdout", str(path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stderr.strip() or "Unable to parse template file")
-        return _normalize_text(proc.stdout)
+        return _normalize_text(_extract_office_text(path.read_bytes(), suffix))
     return _normalize_text(path.read_text(encoding="utf-8", errors="ignore"))
 
 
@@ -287,22 +321,9 @@ def _extract_uploaded_note_text(filename: str, data: bytes) -> str:
 
     if suffix in {".doc", ".docx", ".rtf"}:
         try:
-            with tempfile.TemporaryDirectory(prefix="ngnotes_upload_") as tmpdir:
-                in_path = Path(tmpdir) / f"uploaded{suffix}"
-                in_path.write_bytes(data)
-                proc = subprocess.run(
-                    ["textutil", "-convert", "txt", "-stdout", str(in_path)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if proc.returncode == 0:
-                    return _de_latexify_uploaded_text(proc.stdout)
+            return _de_latexify_uploaded_text(_extract_office_text(data, suffix))
         except Exception:
             return ""
-
-        # Never decode binary office files as text when conversion fails.
-        return ""
 
     text_like_suffixes = {".txt", ".md", ".json", ".xml", ".csv", ".log", ".yaml", ".yml"}
     if suffix not in text_like_suffixes and _is_probably_binary_blob(data):
@@ -897,8 +918,11 @@ def _model_has_vision_capability(model_entry: Dict[str, Any]) -> bool:
     return _is_vision_model_name(str(model_entry.get("name") or ""))
 
 
-def _image_data_to_ollama_b64(data: bytes, filename: Optional[str] = None) -> str:
+def _image_data_to_ollama_b64(data: bytes) -> str:
     # Re-encode to PNG so Ollama gets a consistent, decodable image payload.
+    # register_heif_opener() (module-level, see imports) makes Image.open
+    # decode HEIC/HEIF natively here too, on every platform -- no more
+    # shelling out to macOS-only `sips` for that format.
     try:
         with Image.open(io.BytesIO(data)) as img:
             if img.mode not in {"RGB", "L"}:
@@ -910,25 +934,6 @@ def _image_data_to_ollama_b64(data: bytes, filename: Optional[str] = None) -> st
         pass
     except Exception:
         pass
-
-    # HEIC/HEIF often fails direct decode; on macOS use sips fallback conversion.
-    suffix = Path(filename or "").suffix.lower()
-    if suffix in {".heic", ".heif"}:
-        try:
-            with tempfile.TemporaryDirectory(prefix="ngnotes_img_") as tmpdir:
-                in_path = Path(tmpdir) / f"input{suffix}"
-                out_path = Path(tmpdir) / "converted.png"
-                in_path.write_bytes(data)
-                proc = subprocess.run(
-                    ["sips", "-s", "format", "png", str(in_path), "--out", str(out_path)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if proc.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
-                    return base64.b64encode(out_path.read_bytes()).decode("ascii")
-        except Exception:
-            pass
 
     # Last fallback: raw bytes if format already acceptable to model runtime.
     return base64.b64encode(data).decode("ascii")
@@ -1304,7 +1309,12 @@ async def default_models() -> Dict[str, Any]:
 async def report_templates() -> ReportTemplatesResponse:
     templates: List[ReportTemplateItem] = []
     for p in _list_template_files():
-        text = _extract_template_text(p)
+        # One unreadable/unsupported template file (e.g. a legacy .doc on a
+        # platform that can't parse it) must not take the whole list down.
+        try:
+            text = _extract_template_text(p)
+        except Exception:
+            continue
         excerpt = text[:900] + ("\n..." if len(text) > 900 else "")
         templates.append(
             ReportTemplateItem(
@@ -1390,7 +1400,10 @@ async def report_template_preview(template_id: str) -> ReportTemplatePreviewResp
     path = _find_template_by_id(template_id)
     if not path:
         raise HTTPException(status_code=404, detail="Template not found")
-    text = _extract_template_text(path)
+    try:
+        text = _extract_template_text(path)
+    except Exception as err:
+        raise HTTPException(status_code=422, detail=f"Could not read this template: {err}") from err
     return ReportTemplatePreviewResponse(
         id=template_id,
         name=path.stem,
@@ -1408,7 +1421,10 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
         if not path:
             raise HTTPException(status_code=400, detail="Selected report template was not found")
         template_name = path.stem
-        template_headings = _extract_section_skeleton(_extract_template_text(path))
+        try:
+            template_headings = _extract_section_skeleton(_extract_template_text(path))
+        except Exception as err:
+            raise HTTPException(status_code=422, detail=f"Could not read the selected template: {err}") from err
 
     source_note = _compose_source_note(req.engineering_note, req.image_description)
     allow_code_blocks = bool(req.allow_code_blocks) and _source_indicates_code_blocks(source_note)
@@ -1502,7 +1518,7 @@ async def analyze_image(file: UploadFile = File(...), model: Optional[str] = For
             "description": "No vision-capable Ollama model found. Install one (e.g., llava or qwen2.5-vl), then retry for image-specific analysis.",
         }
 
-    image_b64 = _image_data_to_ollama_b64(data, file.filename)
+    image_b64 = _image_data_to_ollama_b64(data)
     attempted_errors: List[str] = []
     for vision_model in vision_candidates:
         try:
