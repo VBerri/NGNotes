@@ -6,7 +6,7 @@ For how to actually *use* the app once it's running, see **[USER_GUIDE.md](USER_
 
 ## Quick start
 
-1. Install [Ollama](https://ollama.com/download) and pull a model: `ollama pull qwen3.6`. If you'll be analyzing images (whiteboards, drawings, screenshots), also pull `ollama pull gemma4` — it's the preferred model for vision specifically. Having both installed is ideal: `qwen3.6` for report generation, `gemma4` for image analysis.
+1. Install [Ollama](https://ollama.com/download) and pull a model: `ollama pull qwen3.6` or `ollama pull gemma4` — both are well-tested and equally good for this whole pipeline (most other models we've tried aren't), and both handle image analysis well too. Ideally, pull both. If your machine can handle it, use a larger variant of either for better quality: `qwen3.6:27b` / `qwen3.6:35b`, or `gemma4:26b` / `gemma4:31b`.
 2. **Build** the launcher for your platform (a one-time step — PyInstaller can't cross-compile, so this has to run on the actual OS you're launching on). This only compiles the launcher itself; it does not install any of NGNotes' own dependencies yet.
    ```bash
    pip install -r launcher/requirements.txt
@@ -36,7 +36,7 @@ Keep the window it opens running while you use the app; close it (or press Ctrl+
 |---|---|---|
 | Python 3.10+ | Runs the backend | [python.org](https://www.python.org/downloads/) — **not** the Microsoft Store version on Windows; check "Add python.exe to PATH" during install |
 | Node.js (LTS) | Runs the frontend | [nodejs.org](https://nodejs.org) |
-| [Ollama](https://ollama.com) | Runs the LLM locally | `ollama pull qwen3.6` (or any model you prefer); also `ollama pull gemma4` if you'll use image analysis — it's preferred for vision |
+| [Ollama](https://ollama.com) | Runs the LLM locally | `ollama pull qwen3.6` or `ollama pull gemma4` — both are well-tested for this pipeline, including image analysis; larger variants (`qwen3.6:27b`/`:35b`, `gemma4:26b`/`:31b`) if your hardware can handle them |
 | pdflatex | Compiles reports to PDF | macOS: [TinyTeX](https://yihui.org/tinytex/) or [MacTeX](https://tug.org/mactex/) &nbsp;·&nbsp; Windows: [MiKTeX](https://miktex.org/download) |
 
 Worth noting: the launcher itself is a compiled standalone binary, so it doesn't need Python installed to *run* — but the backend it sets up does, which is why Python still shows up in this table.
