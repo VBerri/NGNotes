@@ -1265,17 +1265,27 @@ _LSTSET_BLOCK = (
     # (see the ngntextttbg/ngntextttrule tcolorbox further down) stay light
     # gray -- these are two intentionally different, separately-named colors,
     # not the same colors reused.
+    #
+    # listings' own backgroundcolor/frame system was tried first and dropped:
+    # confirmed via a real render that with frame=lines (top/bottom rules
+    # only, chosen to avoid a known page-break rendering issue with
+    # frame=single), the background shading has no left/right padding at all
+    # -- text starts flush against the box edge -- and listings has no
+    # rounded-corner support whatsoever. Both are fixed by NOT giving
+    # listings a background/frame of its own, and instead wrapping every
+    # \begin{lstlisting}...\end{lstlisting} in a real tcolorbox (which gives
+    # proper padding on all four sides, rounded corners, AND its own
+    # `breakable` option for clean multi-page code blocks) via the
+    # \BeforeBeginEnvironment/\AfterEndEnvironment hooks below. This needs no
+    # changes anywhere else in the pipeline: the environment name in the
+    # generated LaTeX is still exactly \begin{lstlisting}, so the prompt,
+    # sanitizer, and frontend's round-trip parser are all unaffected.
     "\\definecolor{ngnlistingbg}{RGB}{23,23,23}\n"
     "\\definecolor{ngnlistingrule}{RGB}{70,70,70}\n"
     "\\definecolor{ngnlistingtext}{RGB}{235,235,235}\n"
     "\\definecolor{ngnlistingcomment}{RGB}{150,150,150}\n"
     "\\lstset{\n"
     "  basicstyle=\\ttfamily\\footnotesize\\color{ngnlistingtext},\n"
-    "  backgroundcolor=\\color{ngnlistingbg},\n"
-    "  frame=lines,\n"
-    "  framerule=0.4pt,\n"
-    "  rulecolor=\\color{ngnlistingrule},\n"
-    "  framesep=4pt,\n"
     "  breaklines=true,\n"
     "  breakatwhitespace=false,\n"
     "  postbreak=\\mbox{\\textcolor{ngnlistingcomment}{$\\hookrightarrow$}\\space},\n"
@@ -1285,9 +1295,14 @@ _LSTSET_BLOCK = (
     "  tabsize=2,\n"
     "  upquote=true,\n"
     "  keywordstyle=\\bfseries\\color{ngnlistingtext},\n"
-    "  commentstyle=\\color{ngnlistingcomment},\n"
-    "  aboveskip=0.9em,\n"
-    "  belowskip=0.9em\n"
+    "  commentstyle=\\color{ngnlistingcomment}\n"
+    "}\n"
+    "\\BeforeBeginEnvironment{lstlisting}{%\n"
+    "  \\begin{tcolorbox}[breakable, colback=ngnlistingbg, colframe=ngnlistingrule,\n"
+    "    arc=3pt, boxrule=0.4pt, left=6pt, right=6pt, top=4pt, bottom=4pt, boxsep=0pt]\n"
+    "}\n"
+    "\\AfterEndEnvironment{lstlisting}{%\n"
+    "  \\end{tcolorbox}\n"
     "}\n"
     # x86/x64 disassembly needs a dialect-qualified language ("[x86masm]Assembler";
     # bare "Assembler" doesn't exist in listings) — predeclaring it as a named
@@ -1323,6 +1338,12 @@ def _wrap_latex_document(body: str) -> str:
         "\\usepackage{siunitx}\n"
         "\\usepackage{float}\n"
         "\\usepackage{caption,subcaption}\n"
+        # etoolbox must load before _LSTSET_BLOCK, which uses its
+        # \BeforeBeginEnvironment/\AfterEndEnvironment to wrap lstlisting in
+        # a tcolorbox (tcolorbox itself only needs to be loaded by the time
+        # that hook actually fires at content-rendering time, so it can --
+        # and does, below -- come later in the preamble).
+        "\\usepackage{etoolbox}\n"
         "\\usepackage{listings}\n"
         + _LSTSET_BLOCK
         + "\\usepackage{fancyvrb}\n"
