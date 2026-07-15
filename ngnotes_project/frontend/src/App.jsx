@@ -9,7 +9,6 @@ import {
   Highlighter,
   Image,
   Italic,
-  Layers,
   List,
   ListOrdered,
   Loader2,
@@ -1870,8 +1869,8 @@ export default function App() {
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90" style={{ backdropFilter: "blur(8px)" }}>
         <div className="mx-auto flex h-14 w-[95%] items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-blue-600 shadow-sm">
-              <Layers size={17} className="text-brand-gold-400" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-blue-600 shadow-sm">
+              <FileText size={18} className="text-brand-gold-300" strokeWidth={2} />
             </div>
             <span className="text-lg font-semibold tracking-tight text-brand-blue-900">NGNotes</span>
             <span className="rounded-full border border-brand-gold-300 bg-brand-gold-50 px-2 py-0.5 text-xs font-medium text-brand-gold-700">Reports</span>
