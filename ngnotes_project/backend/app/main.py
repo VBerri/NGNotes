@@ -1321,6 +1321,21 @@ def _wrap_latex_document(body: str) -> str:
         + _LSTSET_BLOCK
         + "\\usepackage{fancyvrb}\n"
         "\\usepackage[most]{tcolorbox}\n"
+        # Inline \texttt{...} tokens (identifiers, hex addresses, paths --
+        # see LOCKED_LATEX_FORMAT_GUIDE) previously only got a font change;
+        # this wraps every one in the same small rounded, shaded box used
+        # for full code listings (same ngncodebg/ngncoderule colors, defined
+        # above in _LSTSET_BLOCK) so inline code reads as visually distinct
+        # from surrounding prose, not just differently fonted. "on line"
+        # keeps the box inline within a paragraph instead of starting a new
+        # block. Redefining \texttt directly (rather than introducing a new
+        # macro name) needs zero changes anywhere else in the pipeline --
+        # the prompt, sanitizer, and frontend all already standardize on
+        # \texttt{} for inline code.
+        "\\newtcbox{\\ngntexttt}{on line, arc=2pt, colback=ngncodebg,\n"
+        "  colframe=ngncoderule, boxrule=0.4pt, left=3pt, right=3pt,\n"
+        "  top=1pt, bottom=1pt, boxsep=0pt, fontupper=\\ttfamily\\small}\n"
+        "\\renewcommand{\\texttt}[1]{\\ngntexttt{#1}}\n"
         "\\usepackage[normalem]{ulem}\n"
         "\\begin{document}\n"
         + body
