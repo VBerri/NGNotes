@@ -1575,6 +1575,7 @@ export default function App() {
       topK: Number(topK),
       maxTokens: Number(maxTokens),
       repetitionPenalty: Number(repetitionPenalty),
+      userPromptTemplate,
     };
     persistParamPresets([...paramPresets, preset]);
     setTimedToast(`Saved preset: ${preset.name}`);
@@ -1587,6 +1588,11 @@ export default function App() {
     setTopK(preset.topK);
     setMaxTokens(preset.maxTokens);
     setRepetitionPenalty(preset.repetitionPenalty);
+    // Older presets saved before this field existed won't have it -- keep
+    // whatever user prompt is currently set rather than blanking it out.
+    if (preset.userPromptTemplate !== undefined) {
+      setUserPromptTemplate(preset.userPromptTemplate);
+    }
     setTimedToast(`Applied preset: ${preset.name}`);
   };
 
@@ -2122,6 +2128,30 @@ export default function App() {
                           Max tokens
                           <input type="number" step="256" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-blue-500/30" />
                         </label>
+                      </div>
+
+                      <div className="border-t border-slate-100 pt-4">
+                        <div className="mb-2 flex items-center justify-between">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">User Prompt</div>
+                          <button
+                            onClick={() => setUserPromptTemplate(DEFAULT_USER_TEMPLATE)}
+                            disabled={userPromptTemplate === DEFAULT_USER_TEMPLATE}
+                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            Reset to default
+                          </button>
+                        </div>
+                        <p className="mb-2 text-[11px] text-slate-500">
+                          The task instruction sent to the model on top of your notes. This is the only prompt
+                          setting exposed here — the underlying formatting rules, anti-hallucination guardrails,
+                          and voice/tone behavior stay the same regardless of what you put here.
+                        </p>
+                        <textarea
+                          value={userPromptTemplate}
+                          onChange={(e) => setUserPromptTemplate(e.target.value)}
+                          rows={3}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-brand-blue-500/30"
+                        />
                       </div>
 
                       <div className="border-t border-slate-100 pt-4">

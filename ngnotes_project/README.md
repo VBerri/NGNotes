@@ -6,19 +6,24 @@ For how to actually *use* the app once it's running, see **[USER_GUIDE.md](USER_
 
 ## Quick start
 
-**macOS:**
 1. Install [Ollama](https://ollama.com/download) and pull a model: `ollama pull qwen3.6`
-2. Double-click **`setup.command`** — installs everything the project needs and checks for Ollama/pdflatex.
-3. Double-click **`start.command`** — launches the app and opens it in your browser.
+2. Build the launcher for your platform (PyInstaller can't cross-compile, so this has to run on the actual OS you're launching on):
+   ```bash
+   pip install -r launcher/requirements.txt
+   python launcher/build.py
+   ```
+   This produces, at the project root — next to `backend/` and `frontend/`:
+   - **macOS:** `NGNotes.app` — a real double-clickable app bundle
+   - **Windows:** `NGNotes.exe`
+3. Double-click it. First run installs everything the project needs (checking for Node/Ollama/pdflatex along the way); every run after that just starts the app and opens it in your browser.
 
-Keep the terminal window `start.command` opens running while you use the app; close it (or press Ctrl+C) to stop.
+Keep the window it opens running while you use the app; close it (or press Ctrl+C) to stop.
 
-**Windows:**
-1. Install [Ollama](https://ollama.com/download) and pull a model: `ollama pull qwen3.6`
-2. Double-click **`setup.bat`** — installs everything the project needs and checks for Ollama/pdflatex.
-3. Double-click **`start.bat`** — launches the app (in two windows, titled "NGNotes Backend" and "NGNotes Frontend") and opens it in your browser.
+**macOS Gatekeeper note:** since this isn't Apple-notarized, the first launch may be blocked with an "unidentified developer" warning. Right-click `NGNotes.app` → **Open** (instead of double-clicking) to approve it once — after that, double-clicking works normally.
 
-Closing either of those two windows stops that server.
+**macOS Automation permission note:** `NGNotes.app` opens Terminal.app to show you setup/server output (a plain double-clicked app has no console attached otherwise). The first time, macOS will ask permission for it to control Terminal — click **OK**. This is a one-time prompt.
+
+**Windows SmartScreen note:** similarly, Windows may show an "unrecognized app" warning the first time. Click **More info** → **Run anyway**.
 
 ## What you need installed
 
@@ -29,13 +34,13 @@ Closing either of those two windows stops that server.
 | [Ollama](https://ollama.com) | Runs the LLM locally | `ollama pull qwen3.6` (or any model you prefer) |
 | pdflatex | Compiles reports to PDF | macOS: [TinyTeX](https://yihui.org/tinytex/) or [MacTeX](https://tug.org/mactex/) &nbsp;·&nbsp; Windows: [MiKTeX](https://miktex.org/download) |
 
-`setup.command`/`setup.bat` check for all four and tell you exactly what's missing — they won't silently install system-level tools for you.
+The NGNotes launcher checks for all four on every run and tells you exactly what's missing — it won't silently install system-level tools for you. (It does not need Python or Node installed for *itself* — it's a compiled standalone binary — but it does still need them on your system to set up and run the backend/frontend it launches.)
 
 **MiKTeX note (Windows only):** after installing, open MiKTeX Console and set "Install missing packages on-the-fly" to Yes/Always — otherwise your first PDF export can hang behind a hidden confirmation dialog the first time it needs a package.
 
 ## Manual setup
 
-If you'd rather not use the setup/start scripts:
+If you'd rather not use the executable at all:
 
 ```bash
 # Backend (macOS/Linux)
@@ -91,8 +96,14 @@ frontend/
 templates/
   report_frameworks/  Curated report templates (IEEE / Patient Care / Monthly)
                        plus any templates you save from the app
-setup.command / setup.bat   One-time setup (double-click) — macOS / Windows
-start.command  / start.bat  Launch both servers (double-click) — macOS / Windows
+launcher/
+  launcher.py          Cross-platform setup + launch logic (single source,
+                        compiled per-platform by PyInstaller)
+  build.py             Build script — see "Quick start" above. On macOS this
+                        also assembles the NGNotes.app bundle (Info.plist +
+                        a Terminal-launching wrapper script around the
+                        compiled binary — a plain --onefile binary alone
+                        isn't double-clickable the same way .app bundles are)
 ```
 
 ## Key behavior

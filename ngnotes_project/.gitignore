@@ -27,3 +27,12 @@ desktop.ini
 
 # MS Office lock files (e.g. "~$nthly Report Template.docx")
 ~$*
+
+# Locally-built launcher executables (built via launcher/build.py) -- not
+# checked in, same reasoning as node_modules/.venv: build artifacts, not
+# source. NGNotes.app is a directory (a macOS app bundle), not a single file.
+/NGNotes
+/NGNotes.exe
+/NGNotes.app/
+launcher/_build/
+launcher/*.spec
