@@ -1299,6 +1299,12 @@ def _wrap_latex_document(body: str) -> str:
         "\\usepackage[T1]{fontenc}\n"
         "\\usepackage[margin=1in]{geometry}\n"
         "\\emergencystretch=3em\n"
+        # article's plain default (a first-line indent with zero vertical
+        # gap between paragraphs) makes paragraph breaks hard to see at a
+        # glance -- confirmed by rendering a real sample -- so switch to the
+        # more standard modern-report look: no indent, a clear consistent
+        # gap between paragraphs instead.
+        "\\usepackage{parskip}\n"
         "\\usepackage{amsmath,amssymb}\n"
         "\\usepackage{graphicx}\n"
         "\\usepackage{xcolor}\n"
