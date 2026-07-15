@@ -7,7 +7,7 @@ For how to actually *use* the app once it's running, see **[USER_GUIDE.md](USER_
 ## Quick start
 
 1. Install [Ollama](https://ollama.com/download) and pull a model: `ollama pull qwen3.6`
-2. Build the launcher for your platform (PyInstaller can't cross-compile, so this has to run on the actual OS you're launching on):
+2. **Build** the launcher for your platform (a one-time step — PyInstaller can't cross-compile, so this has to run on the actual OS you're launching on). This only compiles the launcher itself; it does not install any of NGNotes' own dependencies yet.
    ```bash
    pip install -r launcher/requirements.txt
    python launcher/build.py
@@ -15,7 +15,10 @@ For how to actually *use* the app once it's running, see **[USER_GUIDE.md](USER_
    This produces, at the project root — next to `backend/` and `frontend/`:
    - **macOS:** `NGNotes.app` — a real double-clickable app bundle
    - **Windows:** `NGNotes.exe`
-3. Double-click it. First run installs everything the project needs (checking for Node/Ollama/pdflatex along the way); every run after that just starts the app and opens it in your browser.
+3. **Run** it (double-click). This is the step that does the actual work:
+   - Checks for Node.js/Ollama/pdflatex and tells you if anything's missing.
+   - **First run only:** creates the backend's Python virtual environment, installs every backend package (FastAPI, Pillow, python-docx, etc.) and every frontend npm package automatically — nothing to install by hand.
+   - **Every run:** starts both the backend and frontend servers and opens the app in your browser. Runs after the first one skip straight to this step, since it detects the venv/`node_modules` already exist.
 
 Keep the window it opens running while you use the app; close it (or press Ctrl+C) to stop.
 
