@@ -16,9 +16,11 @@ For how to actually *use* the app once it's running, see **[USER_GUIDE.md](USER_
    - **macOS:** `NGNotes.app` — a real double-clickable app bundle
    - **Windows:** `NGNotes.exe`
 3. **Run** it (double-click). This is the step that does the actual work:
-   - Checks for Node.js/Ollama/pdflatex and tells you if anything's missing.
+   - Checks for Python/Node.js/Ollama/pdflatex and tells you if anything's missing.
    - **First run only:** creates the backend's Python virtual environment, installs every backend package (FastAPI, Pillow, python-docx, etc.) and every frontend npm package automatically — nothing to install by hand.
    - **Every run:** starts both the backend and frontend servers and opens the app in your browser. Runs after the first one skip straight to this step, since it detects the venv/`node_modules` already exist.
+
+   **What it can't install for you:** Python, Node.js, Ollama, and a LaTeX distribution (pdflatex) themselves. Those are system-level tools the launcher only checks for and reports on — see the table below for where to get each one. Everything *project-specific* (all the Python/npm packages above) it handles automatically; these four external tools it deliberately does not touch, so it never silently modifies your system outside this project folder.
 
 Keep the window it opens running while you use the app; close it (or press Ctrl+C) to stop.
 
@@ -37,7 +39,7 @@ Keep the window it opens running while you use the app; close it (or press Ctrl+
 | [Ollama](https://ollama.com) | Runs the LLM locally | `ollama pull qwen3.6` (or any model you prefer) |
 | pdflatex | Compiles reports to PDF | macOS: [TinyTeX](https://yihui.org/tinytex/) or [MacTeX](https://tug.org/mactex/) &nbsp;·&nbsp; Windows: [MiKTeX](https://miktex.org/download) |
 
-The NGNotes launcher checks for all four on every run and tells you exactly what's missing — it won't silently install system-level tools for you. (It does not need Python or Node installed for *itself* — it's a compiled standalone binary — but it does still need them on your system to set up and run the backend/frontend it launches.)
+Worth noting: the launcher itself is a compiled standalone binary, so it doesn't need Python installed to *run* — but the backend it sets up does, which is why Python still shows up in this table.
 
 **MiKTeX note (Windows only):** after installing, open MiKTeX Console and set "Install missing packages on-the-fly" to Yes/Always — otherwise your first PDF export can hang behind a hidden confirmation dialog the first time it needs a package.
 
