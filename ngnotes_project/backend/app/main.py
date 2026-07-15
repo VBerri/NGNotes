@@ -1261,27 +1261,31 @@ def _sanitize_latex_body(raw: str, allow_code_blocks: bool = True) -> str:
 # below are plain ASCII so they survive _to_pdflatex_safe_text, which blanks
 # non-ASCII across the whole wrapped document including the preamble.
 _LSTSET_BLOCK = (
-    "\\definecolor{ngncodebg}{RGB}{23,23,23}\n"
-    "\\definecolor{ngncoderule}{RGB}{70,70,70}\n"
-    "\\definecolor{ngncodetext}{RGB}{235,235,235}\n"
-    "\\definecolor{ngncodecomment}{RGB}{150,150,150}\n"
+    # Full lstlisting blocks get a dark/black theme; inline \texttt{} snippets
+    # (see the ngntextttbg/ngntextttrule tcolorbox further down) stay light
+    # gray -- these are two intentionally different, separately-named colors,
+    # not the same colors reused.
+    "\\definecolor{ngnlistingbg}{RGB}{23,23,23}\n"
+    "\\definecolor{ngnlistingrule}{RGB}{70,70,70}\n"
+    "\\definecolor{ngnlistingtext}{RGB}{235,235,235}\n"
+    "\\definecolor{ngnlistingcomment}{RGB}{150,150,150}\n"
     "\\lstset{\n"
-    "  basicstyle=\\ttfamily\\footnotesize\\color{ngncodetext},\n"
-    "  backgroundcolor=\\color{ngncodebg},\n"
+    "  basicstyle=\\ttfamily\\footnotesize\\color{ngnlistingtext},\n"
+    "  backgroundcolor=\\color{ngnlistingbg},\n"
     "  frame=lines,\n"
     "  framerule=0.4pt,\n"
-    "  rulecolor=\\color{ngncoderule},\n"
+    "  rulecolor=\\color{ngnlistingrule},\n"
     "  framesep=4pt,\n"
     "  breaklines=true,\n"
     "  breakatwhitespace=false,\n"
-    "  postbreak=\\mbox{\\textcolor{ngncodecomment}{$\\hookrightarrow$}\\space},\n"
+    "  postbreak=\\mbox{\\textcolor{ngnlistingcomment}{$\\hookrightarrow$}\\space},\n"
     "  columns=fullflexible,\n"
     "  keepspaces=true,\n"
     "  showstringspaces=false,\n"
     "  tabsize=2,\n"
     "  upquote=true,\n"
-    "  keywordstyle=\\bfseries\\color{ngncodetext},\n"
-    "  commentstyle=\\color{ngncodecomment},\n"
+    "  keywordstyle=\\bfseries\\color{ngnlistingtext},\n"
+    "  commentstyle=\\color{ngnlistingcomment},\n"
     "  aboveskip=0.9em,\n"
     "  belowskip=0.9em\n"
     "}\n"
@@ -1325,18 +1329,20 @@ def _wrap_latex_document(body: str) -> str:
         "\\usepackage[most]{tcolorbox}\n"
         # Inline \texttt{...} tokens (identifiers, hex addresses, paths --
         # see LOCKED_LATEX_FORMAT_GUIDE) previously only got a font change;
-        # this wraps every one in the same small rounded, shaded box used
-        # for full code listings (same ngncodebg/ngncoderule colors, defined
-        # above in _LSTSET_BLOCK) so inline code reads as visually distinct
-        # from surrounding prose, not just differently fonted. "on line"
-        # keeps the box inline within a paragraph instead of starting a new
-        # block. Redefining \texttt directly (rather than introducing a new
-        # macro name) needs zero changes anywhere else in the pipeline --
-        # the prompt, sanitizer, and frontend all already standardize on
-        # \texttt{} for inline code.
-        "\\newtcbox{\\ngntexttt}{on line, arc=2pt, colback=ngncodebg,\n"
-        "  colframe=ngncoderule, boxrule=0.4pt, left=3pt, right=3pt,\n"
-        "  top=1pt, bottom=1pt, boxsep=0pt, fontupper=\\ttfamily\\small\\color{ngncodetext}}\n"
+        # this wraps every one in a small rounded, light-gray box -- kept
+        # deliberately light (NOT the dark ngnlistingbg used for full
+        # lstlisting blocks above) so a single inline reference doesn't read
+        # as heavy as a whole code block. "on line" keeps the box inline
+        # within a paragraph instead of starting a new block. Redefining
+        # \texttt directly (rather than introducing a new macro name) needs
+        # zero changes anywhere else in the pipeline -- the prompt,
+        # sanitizer, and frontend all already standardize on \texttt{} for
+        # inline code.
+        "\\definecolor{ngntextttbg}{RGB}{245,246,248}\n"
+        "\\definecolor{ngntextttrule}{RGB}{203,208,214}\n"
+        "\\newtcbox{\\ngntexttt}{on line, arc=2pt, colback=ngntextttbg,\n"
+        "  colframe=ngntextttrule, boxrule=0.4pt, left=3pt, right=3pt,\n"
+        "  top=1pt, bottom=1pt, boxsep=0pt, fontupper=\\ttfamily\\small}\n"
         "\\renewcommand{\\texttt}[1]{\\ngntexttt{#1}}\n"
         "\\usepackage[normalem]{ulem}\n"
         "\\begin{document}\n"
