@@ -148,6 +148,11 @@ Formatting contract (compatible package capabilities):
 - Multi-line code, disassembly listings, hex dumps, or terminal/shell output must go in a
   \begin{lstlisting}...\end{lstlisting} block, not inline \texttt{} and not a plain paragraph —
   use \begin{lstlisting}[style=ngnasm] for x86/x64 disassembly excerpts specifically.
+- The closing tag of any \begin{X}...\end{X} block must spell X exactly the same both times,
+  character for character (e.g. \begin{lstlisting} must be closed with exactly \end{lstlisting},
+  not \end{lstisting} or any other near-miss). A misspelled closing tag doesn't just fail to
+  render one block — it makes the environment never actually close, silently absorbing every
+  paragraph after it into that block until some later closing tag happens to match.
 - Links/references: write in prose; avoid raw URLs unless present in source notes.
 - Styling should remain conservative and publication-friendly.
 """.strip()
@@ -619,6 +624,75 @@ def _normalize_asm_lstlisting_options(src: str) -> str:
     return _ASM_LSTLISTING_OPTION_RE.sub(f"\\\\begin{{lstlisting}}[{_LSTLISTING_ASM_STYLE}]", str(src or ""))
 
 
+# Environments this app ever renders (see splitLatexBlocks/domNodeToLatex on
+# the frontend and the sanitize pipeline below) — used to recognize a typo'd
+# \end{...} tag as "probably meant to close the environment currently open."
+_KNOWN_LATEX_ENVIRONMENTS = (
+    "itemize", "enumerate", "tabular", "tabularx", "longtable",
+    "lstlisting", "verbatim", "quote",
+)
+_ENV_BEGIN_END_RE = re.compile(r"\\(begin|end)\{([a-zA-Z]+)\}")
+
+
+def _levenshtein_at_most(a: str, b: str, limit: int) -> bool:
+    """True if the edit distance between a and b is <= limit. Only needs to
+    be right for short environment-name-length strings, not fast."""
+    if abs(len(a) - len(b)) > limit:
+        return False
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        prev = cur
+    return prev[-1] <= limit
+
+
+def _normalize_environment_typos(src: str) -> str:
+    """Fix a \\end{...} tag that's a near-miss typo of the environment it's
+    actually meant to close (e.g. \\end{lstisting} instead of \\end{lstlisting}
+    -- a real, observed model output).
+
+    This one is nastier than most LaTeX typos: `listings` (and several other
+    environments) don't use LaTeX's normal \\newenvironment name matching --
+    they scan verbatim for the literal string "\\end{lstlisting}". A typo'd
+    end tag doesn't fail to match and error out; it's simply not found, so
+    the environment keeps consuming everything after it -- prose, a second
+    \\begin{lstlisting}, anything -- as literal code-block content, until it
+    happens to hit some later \\end{...} that does match. Confirmed via a
+    real pdflatex compile: this produces no error at all, just a document
+    with a large stretch of prose silently swallowed into one garbled code
+    block. Must run before any brace-balance or lstlisting-body-blanking
+    pass, both of which rely on \\begin{lstlisting}...\\end{lstlisting}
+    pairing correctly to know what's "inside" a listing.
+    """
+    stack: List[str] = []
+    out: List[str] = []
+    pos = 0
+    for m in _ENV_BEGIN_END_RE.finditer(str(src or "")):
+        out.append(src[pos:m.start()])
+        pos = m.end()
+        kind, name = m.group(1), m.group(2)
+        if kind == "begin":
+            if name in _KNOWN_LATEX_ENVIRONMENTS:
+                stack.append(name)
+            out.append(m.group(0))
+            continue
+        # kind == "end"
+        if stack and name == stack[-1]:
+            stack.pop()
+            out.append(m.group(0))
+            continue
+        if stack and name != stack[-1] and _levenshtein_at_most(name, stack[-1], 2):
+            expected = stack.pop()
+            out.append(f"\\end{{{expected}}}")
+            continue
+        out.append(m.group(0))
+    out.append(src[pos:])
+    return "".join(out)
+
+
 def _build_effective_system_prompt(user_system_prompt: Optional[str], allow_code_blocks: bool) -> str:
     if allow_code_blocks:
         mode_block = (
@@ -656,8 +730,12 @@ def _source_indicates_code_blocks(text: str) -> bool:
         r"[a-zA-Z]:\\[^\s]+",
         # Hex addresses/offsets (0x403020) and IDA/Ghidra-style auto-generated
         # symbol names (sub_403020, loc_401550, off_ ...) — disassembly notes
-        # are dense with both and rarely trip the other signals above.
-        r"\b0x[0-9a-f]{3,}\b",
+        # are dense with both and rarely trip the other signals above. 2+
+        # digits (not 3+) so single-byte magic sequences like "0xDE, 0xAD,
+        # 0xBE, 0xEF" still count — a real case that previously fell through
+        # every signal here and got a lstlisting block silently flattened to
+        # prose instead of kept as code.
+        r"\b0x[0-9a-f]{2,}\b",
         r"\b(?:sub|loc|off|byte|word|dword|qword)_[0-9a-f]{4,}\b",
         # x86/x64 general-purpose register names — distinctive enough (unlike
         # bare mnemonics such as "or"/"and", which are common English words)
@@ -1095,6 +1173,13 @@ def _sanitize_latex_body(raw: str, allow_code_blocks: bool = True) -> str:
     # own docstring for why a broken model-emitted assembler language tag has
     # to be fixed first.
     src = _normalize_asm_lstlisting_options(src)
+
+    # Must also run early, before markdown-fence conversion and especially
+    # before the brace-balance check below, both of which need correctly
+    # paired \begin/\end environments to know what counts as "inside" a
+    # listing (see _normalize_environment_typos' docstring for the failure
+    # mode this prevents — silently corrupted output with no compile error).
+    src = _normalize_environment_typos(src)
 
     if allow_code_blocks:
         src = _convert_markdown_fences_to_lstlisting(src)

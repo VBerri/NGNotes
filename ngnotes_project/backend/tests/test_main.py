@@ -18,6 +18,7 @@ from app.main import (
     _has_unbalanced_braces,
     _latex_escape,
     _normalize_asm_lstlisting_options,
+    _normalize_environment_typos,
     _normalize_ollama_options,
     _normalize_tabular_columns,
     _safe_filename_stem,
@@ -190,6 +191,15 @@ class TestSourceIndicatesCodeBlocks:
         note = "We had a great meeting today and decided to push the release or wait until Monday."
         assert _source_indicates_code_blocks(note) is False
 
+    def test_detects_short_hex_byte_sequences(self):
+        # Regression: a stray magic-number byte sequence like this used to
+        # need 3+ hex digits per token (0x403020-style addresses); 2-digit
+        # bytes (0xDE, 0xAD, ...) fell through every signal, which caused
+        # _prune_unnecessary_lstlisting to flatten a legitimate lstlisting
+        # code block back into plain prose.
+        assert _source_indicates_code_blocks("0xDE, 0xAD, 0xBE, 0xEF") is True
+        assert _source_indicates_code_blocks("0xCA, 0xFE, 0xBA, 0xBE") is True
+
 
 # ---------------------------------------------------------------------------
 # _normalize_asm_lstlisting_options
@@ -220,6 +230,65 @@ class TestNormalizeAsmLstlistingOptions:
             "\\end{lstlisting}"
         )
         assert "style=ngnasm" in body
+        pdf_bytes = _compile_latex_pdf(body)
+        assert pdf_bytes[:4] == b"%PDF"
+
+
+# ---------------------------------------------------------------------------
+# _normalize_environment_typos
+# ---------------------------------------------------------------------------
+
+class TestNormalizeEnvironmentTypos:
+    def test_fixes_dropped_letter_typo(self):
+        # Real observed model output: \end{lstisting} (missing an "l") doesn't
+        # match \end{lstlisting}. Confirmed via direct pdflatex testing that
+        # this produces NO compile error at all -- `listings` scans verbatim
+        # for the literal closing string, so a typo'd end tag makes it
+        # silently swallow everything after it (prose, a second code block,
+        # anything) as code content until some later \end{} happens to match.
+        src = "\\begin{lstlisting}\n0xDE, 0xAD\n\\end{lstisting}\nMore text.\n\\begin{lstlisting}\n0xCA\n\\end{lstlisting}"
+        out = _normalize_environment_typos(src)
+        assert out.count("\\begin{lstlisting}") == 2
+        assert out.count("\\end{lstlisting}") == 2
+        assert "lstisting" not in out
+
+    def test_leaves_correctly_matched_environments_untouched(self):
+        src = "\\begin{itemize}\n\\item A\n\\end{itemize}\n\\begin{lstlisting}\ncode\n\\end{lstlisting}"
+        assert _normalize_environment_typos(src) == src
+
+    def test_does_not_touch_unrelated_end_tag_when_nothing_is_open(self):
+        # No matching \begin at all -- must not "correct" this into some
+        # arbitrary known environment name just because it's nearby in the
+        # known-environments list.
+        src = "stray \\end{lstlisting} with nothing open before it"
+        assert _normalize_environment_typos(src) == src
+
+    def test_corrects_toward_whichever_environment_is_actually_open(self):
+        # tabular vs tabularx are only 1 character apart -- must correct
+        # toward the one that was actually opened, not just "the nearest
+        # known name" in the abstract.
+        src = "\\begin{tabularx}{\\linewidth}{ll}\nA & B \\\\\n\\end{tabular}"
+        out = _normalize_environment_typos(src)
+        assert "\\end{tabularx}" in out
+
+    def test_end_to_end_matches_reported_bug_exactly(self):
+        # The exact structure reported: two lstlisting blocks (hex magic
+        # sequences) separated by prose with \texttt{} identifiers, where the
+        # first block's end tag is typo'd.
+        src = (
+            r"\section{Analysis}"
+            "\\begin{lstlisting}\n0xDE, 0xAD, 0xBE, 0xEF\n\\end{lstisting}\n"
+            r"When the sequence matches, the routine sets an \texttt{unlock_mode} flag."
+            "\n\\begin{lstlisting}\n0xCA, 0xFE, 0xBA, 0xBE\n\\end{lstlisting}"
+        )
+        body = _sanitize_latex_body(src)
+        assert body.count("\\begin{lstlisting}") == 2
+        # The prose must sit between the two code blocks, not be swallowed
+        # into either one of them.
+        first_end = body.index("\\end{lstlisting}")
+        second_begin = body.index("\\begin{lstlisting}", first_end)
+        between = body[first_end:second_begin]
+        assert "unlock" in between
         pdf_bytes = _compile_latex_pdf(body)
         assert pdf_bytes[:4] == b"%PDF"
 
