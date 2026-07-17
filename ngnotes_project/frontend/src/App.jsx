@@ -243,6 +243,13 @@ export function decodeLatexEscapes(text) {
     [/\\textasciicircum\{\}/g, "^"],
     [/\\today/g, new Date().toLocaleDateString()],
     [/~+/g, " "],
+    // LaTeX spacing commands (\, \; \:) read as plain spaces in the editor;
+    // \! (negative thin space) has no textual width at all. Decoding them
+    // matters because escapeLatexText below re-escapes any backslash it
+    // finds on the way back — a `3\,A` left undecoded would round-trip into
+    // a literal "\," in the PDF.
+    [/\\[,;:]/g, " "],
+    [/\\!/g, ""],
   ];
 
   for (const [pattern, replacement] of replacements) {
@@ -256,6 +263,30 @@ export function decodeLatexEscapes(text) {
 // surrounding whitespace is genuinely insignificant.
 export function decodeLatexPreviewText(text) {
   return decodeLatexEscapes(text).trim();
+}
+
+// Exact inverse of decodeLatexEscapes, applied when serializing edited DOM
+// text back to LaTeX (domNodeToLatex/serializeDocumentToLatex). Without it,
+// one blur round-trip turns every decoded-for-display special back into a
+// live LaTeX token: a pair of $'s swallows everything between them as math,
+// % comments out the rest of its line, and & or _ fails the compile — which
+// then trips the silent auto-fix-on-export path and replaces the whole
+// document (and the user's edits with it) with fresh LLM output.
+// Single-pass character map so already-produced escapes are never rescanned.
+const LATEX_TEXT_ESCAPES = {
+  "\\": "\\textbackslash{}",
+  "{": "\\{",
+  "}": "\\}",
+  "&": "\\&",
+  "%": "\\%",
+  $: "\\$",
+  "#": "\\#",
+  _: "\\_",
+  "~": "\\textasciitilde{}",
+  "^": "\\textasciicircum{}",
+};
+export function escapeLatexText(text) {
+  return String(text || "").replace(/[\\{}&%$#_~^]/g, (ch) => LATEX_TEXT_ESCAPES[ch]);
 }
 
 export function parseLatexForPreview(latexSource) {
@@ -343,31 +374,47 @@ export function renderInlineLatexHtml(text) {
   const src = String(text || "");
   let out = "";
   let idx = 0;
-  const pattern =
-    /\\textbf\{([^{}]*)\}|\\textit\{([^{}]*)\}|\\emph\{([^{}]*)\}|\\texttt\{([^{}]*)\}|\\underline\{([^{}]*)\}|\\sout\{([^{}]*)\}|\\textsuperscript\{([^{}]*)\}|\\textsubscript\{([^{}]*)\}|\\colorbox\{[^{}]*\}\{([^{}]*)\}|\$([^$]+)\$/g;
+  // \underline{}/\colorbox{yellow}{} (and the briefly-shipped soul \ul{}/
+  // \hl{}) are kept alongside the current \uline{}/\nghighlight{} forms
+  // purely so documents generated before those switches still round-trip
+  // correctly in the preview/editor.
+  //
+  // ARG allows one level of nested braces — highlighting/underlining over
+  // already-formatted text serializes to e.g. \nghighlight{a \textbf{b} c}
+  // (see domNodeToLatex), which a flat [^{}]* silently fails to match, so
+  // the formatting was stripped on the next re-render. Nested content is
+  // rendered by recursing rather than escaping it as plain text.
+  const ARG = String.raw`((?:[^{}]|\{[^{}]*\})*)`;
+  const pattern = new RegExp(
+    String.raw`\\textbf\{${ARG}\}|\\textit\{${ARG}\}|\\emph\{${ARG}\}|\\texttt\{${ARG}\}|\\underline\{${ARG}\}|\\uline\{${ARG}\}|\\ul\{${ARG}\}|\\sout\{${ARG}\}|\\textsuperscript\{${ARG}\}|\\textsubscript\{${ARG}\}|\\colorbox\{[^{}]*\}\{${ARG}\}|\\nghighlight\{${ARG}\}|\\hl\{${ARG}\}|(?<!\\)\$([^$]+)(?<!\\)\$`,
+    "g"
+  );
+  // Recursion terminates because each level strips the outer \command{}
+  // wrapper: the argument is strictly shorter than the match that produced it.
+  const inner = (fragment) => renderInlineLatexHtml(String(fragment).trim());
   let m;
   while ((m = pattern.exec(src)) !== null) {
     if (m.index > idx) {
       out += escapeHtml(stripStrayLatexCommands(decodeLatexEscapes(src.slice(idx, m.index))));
     }
     if (m[1] !== undefined) {
-      out += `<strong>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[1])))}</strong>`;
+      out += `<strong>${inner(m[1])}</strong>`;
     } else if (m[2] !== undefined || m[3] !== undefined) {
-      out += `<em>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[2] ?? m[3])))}</em>`;
+      out += `<em>${inner(m[2] ?? m[3])}</em>`;
     } else if (m[4] !== undefined) {
       out += `<code>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[4])))}</code>`;
-    } else if (m[5] !== undefined) {
-      out += `<u>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[5])))}</u>`;
-    } else if (m[6] !== undefined) {
-      out += `<s>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[6])))}</s>`;
-    } else if (m[7] !== undefined) {
-      out += `<sup>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[7])))}</sup>`;
+    } else if (m[5] !== undefined || m[6] !== undefined || m[7] !== undefined) {
+      out += `<u>${inner(m[5] ?? m[6] ?? m[7])}</u>`;
     } else if (m[8] !== undefined) {
-      out += `<sub>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[8])))}</sub>`;
+      out += `<s>${inner(m[8])}</s>`;
     } else if (m[9] !== undefined) {
-      out += `<mark>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[9])))}</mark>`;
+      out += `<sup>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[9])))}</sup>`;
     } else if (m[10] !== undefined) {
-      out += `<span class="ngn-math" contenteditable="false" data-latex="${escapeHtml(m[10])}">${renderKatex(m[10])}</span>`;
+      out += `<sub>${escapeHtml(stripStrayLatexCommands(decodeLatexPreviewText(m[10])))}</sub>`;
+    } else if (m[11] !== undefined || m[12] !== undefined || m[13] !== undefined) {
+      out += `<mark>${inner(m[11] ?? m[12] ?? m[13])}</mark>`;
+    } else if (m[14] !== undefined) {
+      out += `<span class="ngn-math" contenteditable="false" data-latex="${escapeHtml(m[14])}">${renderKatex(m[14])}</span>`;
     }
     idx = pattern.lastIndex;
   }
@@ -473,7 +520,11 @@ export function latexBlocksToHtml(text) {
 // vocabulary. Scoped intentionally to only what we ever render, not arbitrary
 // HTML, so the round-trip stays predictable.
 export function domNodeToLatex(node) {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  // Text nodes hold decoded, display-form text (see decodeLatexEscapes), so
+  // LaTeX specials the user typed or that were decoded for display must be
+  // re-escaped here. Verbatim contexts never reach this branch: <pre> blocks
+  // and math spans are intercepted below before their children are walked.
+  if (node.nodeType === Node.TEXT_NODE) return escapeLatexText(node.textContent);
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
   const el = node;
@@ -494,7 +545,9 @@ export function domNodeToLatex(node) {
     case "code":
       return el.closest("pre") ? kids() : `\\texttt{${kids()}}`;
     case "u":
-      return `\\underline{${kids()}}`;
+      // ulem's \uline, not the plain-LaTeX \underline{} — the latter is an
+      // unbreakable hbox that runs text off the page instead of wrapping.
+      return `\\uline{${kids()}}`;
     case "s":
     case "del":
     case "strike":
@@ -504,7 +557,10 @@ export function domNodeToLatex(node) {
     case "sub":
       return `\\textsubscript{${kids()}}`;
     case "mark":
-      return `\\colorbox{yellow}{${kids()}}`;
+      // \nghighlight (ulem-based, defined in the backend preamble), not
+      // \colorbox{yellow}{} — \colorbox is an unbreakable hbox that runs
+      // text off the page instead of wrapping.
+      return `\\nghighlight{${kids()}}`;
     case "blockquote":
       return `\\begin{quote}\n${kids().trim()}\n\\end{quote}\n\n`;
     case "br":
@@ -558,11 +614,14 @@ export function editableDomToLatex(container) {
 // handleArticleBlur) and gets appended as-is instead of a \section block.
 export function serializeDocumentToLatex(doc, fallbackLatex) {
   const parts = [];
-  const title = String(doc.title || "").trim();
+  // Title/author/date/section titles arrive as decoded plain text (they're
+  // read via textContent in handleArticleBlur), so escape them like any
+  // other text node — an "&" or "%" in a title otherwise breaks the compile.
+  const title = escapeLatexText(String(doc.title || "").trim());
   if (title) {
     parts.push(`\\title{${title}}`);
-    parts.push(`\\author{${String(doc.author || "").trim() || "NGNotes"}}`);
-    parts.push(`\\date{${String(doc.date || "").trim() || "\\today"}}`);
+    parts.push(`\\author{${escapeLatexText(String(doc.author || "").trim()) || "NGNotes"}}`);
+    parts.push(`\\date{${escapeLatexText(String(doc.date || "").trim()) || "\\today"}}`);
     parts.push("\\maketitle");
   }
 
@@ -574,7 +633,7 @@ export function serializeDocumentToLatex(doc, fallbackLatex) {
   const sections = doc.sections || [];
   if (sections.length > 0) {
     sections.forEach((s, idx) => {
-      const sectionTitle = String(s.title || "").trim() || `Section ${idx + 1}`;
+      const sectionTitle = escapeLatexText(String(s.title || "").trim()) || `Section ${idx + 1}`;
       const content = String(s.contentLatex || "").trim();
       parts.push(`\\section{${sectionTitle}}\n${content}`);
     });
@@ -1256,6 +1315,19 @@ export default function App() {
     return Boolean(el && el.closest && el.closest(".ngn-doc-article"));
   };
 
+  // Block-level tags that must never end up as a *child* of an inline
+  // wrapper (mark/code) below. If a selection's fragment contains one of
+  // these — e.g. the drag crossed from one paragraph into the next, or
+  // clipped part of a <pre><code> block — surroundContents() throws and the
+  // naive fix (extractContents + reinsert) would nest that block element
+  // inside an inline tag. Browsers don't lay that out sanely: the block
+  // escapes its normal width constraint and renders as unwrapped text
+  // running off the page, and it corrupts the pre>code structure that
+  // domNodeToLatex relies on to round-trip code boxes back to \lstlisting.
+  const BLOCK_LEVEL_TAGS = new Set(["P", "DIV", "PRE", "TABLE", "TR", "TD", "TH", "UL", "OL", "LI", "H4", "BLOCKQUOTE"]);
+  const fragmentHasBlockElement = (fragment) =>
+    Boolean(fragment.querySelector && fragment.querySelector([...BLOCK_LEVEL_TAGS].join(",")));
+
   // Wraps the current text selection (anywhere in the report article) in a
   // formatting tag. Toolbar buttons call this on click; they use
   // onMouseDown+preventDefault so the click never blurs the editable region
@@ -1277,6 +1349,10 @@ export default function App() {
 
     // No native execCommand for these (inline code, highlight) — wrap manually.
     const range = selection.getRangeAt(0);
+    if (fragmentHasBlockElement(range.cloneContents())) {
+      setTimedToast("Select text within a single paragraph to format it.");
+      return;
+    }
     const wrapper = document.createElement(tagName);
     try {
       range.surroundContents(wrapper);
@@ -1381,7 +1457,32 @@ export default function App() {
       setTimedToast("Click into the report first.");
       return;
     }
-    const range = selection.getRangeAt(0);
+    let range = selection.getRangeAt(0);
+    // The caret can legitimately sit inside the article but outside any
+    // .ngn-rich-content body — on the title/author/date, a section heading,
+    // or the gap between sections. Content inserted there gets none of the
+    // rich-content styling (a code block shows no dark box at all) and,
+    // worse, handleArticleBlur only serializes the rich-content bodies, so
+    // the insert would silently vanish on the next blur. Retarget those
+    // inserts to the end of the nearest section body instead.
+    const startNode = range.commonAncestorContainer;
+    const startEl = startNode.nodeType === Node.TEXT_NODE ? startNode.parentElement : startNode;
+    if (startEl && !startEl.closest(".ngn-rich-content")) {
+      const article = startEl.closest(".ngn-doc-article");
+      const bodies = article ? article.querySelectorAll(".ngn-rich-content") : [];
+      // Prefer the body of the section whose heading the caret is on; fall
+      // back to the document's last body (e.g. caret in the header area).
+      const target =
+        startEl.closest('[data-role="section"]')?.querySelector(".ngn-rich-content") ||
+        bodies[bodies.length - 1];
+      if (!target) {
+        setTimedToast("Click inside a section body first.");
+        return;
+      }
+      range = document.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+    }
     range.deleteContents();
     const template = document.createElement("template");
     template.innerHTML = html;

@@ -74,6 +74,23 @@ describe("renderInlineLatexHtml", () => {
   it("escapes raw HTML-significant characters in plain text", () => {
     expect(renderInlineLatexHtml("<script>")).not.toContain("<script>");
   });
+
+  it("renders a highlight whose argument contains nested formatting", () => {
+    // Regression: highlighting across already-bold text serializes to
+    // \nghighlight{a \textbf{b} c}; a flat [^{}]* argument pattern failed to
+    // match it, so the highlight was silently stripped on the next re-render.
+    const out = renderInlineLatexHtml("\\nghighlight{a \\textbf{b} c}");
+    expect(out).toContain("<mark>");
+    expect(out).toContain("<strong>b</strong>");
+  });
+
+  it("does not treat escaped \\$ dollar signs as math delimiters", () => {
+    // Regression: "cost \$40 to \$50" was parsed as one math span spanning
+    // everything between the two dollars, mangling the paragraph.
+    const out = renderInlineLatexHtml("cost \\$40 to \\$50 total");
+    expect(out).not.toContain("ngn-math");
+    expect(out).toContain("$40 to $50");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -158,6 +175,32 @@ describe("domNodeToLatex round trips", () => {
     expect(editableDomToLatex(div)).toBe("Before\n\n\\begin{lstlisting}\nprint('hi')\n\\end{lstlisting}");
   });
 
+  it("survives a code block inserted mid-paragraph (pre nested inside a p by range.insertNode)", () => {
+    // The toolbar's insertCodeBlock uses Range.insertNode, which happily
+    // places the <pre> INSIDE the paragraph the caret was in (raw DOM APIs
+    // don't enforce HTML content models). Built via DOM calls because
+    // innerHTML parsing would auto-close the <p> before the <pre>.
+    const p = document.createElement("p");
+    p.append("before ");
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.textContent = "your code here";
+    pre.appendChild(code);
+    p.appendChild(pre);
+    p.append("after");
+    const div = document.createElement("div");
+    div.appendChild(p);
+
+    const latex = editableDomToLatex(div);
+    expect(latex).toContain("\\begin{lstlisting}\nyour code here\n\\end{lstlisting}");
+
+    // Re-render from the serialized LaTeX (what previewDoc recompute does on
+    // blur) must still produce a pre>code block so the dark theme reapplies.
+    const html = latexBlocksToHtml(latex);
+    expect(html).toContain("<pre><code>your code here");
+    expect(html).toContain("</code></pre>");
+  });
+
   it("round trips an inserted equation span using its stashed data-latex source", () => {
     const div = document.createElement("div");
     div.innerHTML = 'Value is <span class="ngn-math" contenteditable="false" data-latex="E = mc^2">rendered</span> done.';
@@ -183,6 +226,26 @@ describe("domNodeToLatex round trips", () => {
     const div = document.createElement("div");
     div.innerHTML = "<pre><code>plain_code()</code></pre>";
     expect(editableDomToLatex(div)).toBe("\\begin{lstlisting}\nplain_code()\n\\end{lstlisting}");
+  });
+
+  it("re-escapes LaTeX specials in edited text nodes", () => {
+    // Regression: text nodes hold decoded display text ("92%", "$40", "&");
+    // serializing them back without escaping produced live LaTeX tokens —
+    // $...$ swallowed text as math, % commented out the rest of the line,
+    // and & or _ failed the compile (which then triggered the silent
+    // auto-fix-on-export LLM rewrite, discarding the user's edits).
+    const div = document.createElement("div");
+    div.textContent = "92% at $40 & unit_v2 #1 10^3";
+    expect(editableDomToLatex(div)).toBe(
+      "92\\% at \\$40 \\& unit\\_v2 \\#1 10\\textasciicircum{}3"
+    );
+  });
+
+  it("keeps escaped specials stable across a full display/serialize round trip", () => {
+    const src = "Cost \\$40 \\& 92\\% for unit\\_v2.";
+    const div = document.createElement("div");
+    div.innerHTML = latexBlocksToHtml(src);
+    expect(editableDomToLatex(div)).toBe(src);
   });
 });
 

@@ -1,5 +1,9 @@
 import io
+import re
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 import pytest
 from docx import Document as DocxDocument
@@ -20,10 +24,13 @@ from app.main import (
     _normalize_asm_lstlisting_options,
     _normalize_environment_typos,
     _normalize_ollama_options,
+    _normalize_stacked_decorations,
     _normalize_tabular_columns,
     _safe_filename_stem,
     _sanitize_latex_body,
     _source_indicates_code_blocks,
+    _to_pdflatex_safe_text,
+    _wrap_latex_document,
     app,
 )
 from app.schemas import GenerateRequest
@@ -161,6 +168,107 @@ class TestNormalizeTabularColumns:
         assert "{|l|l|l|}" in body
         pdf_bytes = _compile_latex_pdf(body)
         assert pdf_bytes[:4] == b"%PDF"
+
+
+# ---------------------------------------------------------------------------
+# _normalize_stacked_decorations (stacked underline/strikeout/highlight)
+# ---------------------------------------------------------------------------
+
+class TestNormalizeStackedDecorations:
+    def test_two_stacked_decorations_collapse_to_single_ngdecorate_pass(self):
+        out = _normalize_stacked_decorations(r"\uline{\nghighlight{some text}}")
+        assert out == r"\ngdecorate{\ngmarkHL\ngmarkUL}{some text}"
+
+    def test_nesting_order_does_not_matter(self):
+        a = _normalize_stacked_decorations(r"\uline{\sout{x}}")
+        b = _normalize_stacked_decorations(r"\sout{\uline{x}}")
+        assert a == b == r"\ngdecorate{\ngmarkUL\ngmarkSO}{x}"
+
+    def test_font_command_inside_decoration_is_hoisted_outside(self):
+        # \uline{\textbf{long...}} is one unbreakable hbox (~699pt overfull);
+        # the reverse order wraps, so the font must move outside.
+        out = _normalize_stacked_decorations(r"\uline{\textbf{bold under}}")
+        assert out == r"\textbf{\uline{bold under}}"
+
+    def test_partial_font_inside_decoration_splits_the_run(self):
+        out = _normalize_stacked_decorations(r"\uline{a \textbf{b} c}")
+        assert out == r"\uline{a }\textbf{\uline{b}}\uline{ c}"
+
+    def test_single_decorations_keep_native_commands(self):
+        src = r"\uline{a} \sout{b} \nghighlight{c}"
+        assert _normalize_stacked_decorations(src) == src
+
+    def test_all_five_formats_stack_into_fonts_outside_single_deco_pass(self):
+        out = _normalize_stacked_decorations(
+            r"\textbf{\textit{\uline{\nghighlight{\sout{words}}}}}"
+        )
+        assert out == r"\textbf{\textit{\ngdecorate{\ngmarkHL\ngmarkUL\ngmarkSO}{words}}}"
+
+    def test_superscript_inside_decoration_is_hoisted(self):
+        # \textsuperscript inside any ulem argument is a hard "Extra }"
+        # compile error in stock ulem (isolated by direct pdflatex test).
+        out = _normalize_stacked_decorations(r"\uline{x\textsuperscript{2} y}")
+        assert out == r"\uline{x}\textsuperscript{\uline{2}}\uline{ y}"
+
+    def test_math_span_stays_inside_the_decorated_run(self):
+        out = _normalize_stacked_decorations(r"\uline{\sout{a $E = mc^2$ b}}")
+        assert out == r"\ngdecorate{\ngmarkUL\ngmarkSO}{a $E = mc^2$ b}"
+
+    def test_texttt_inside_decoration_stays_inside_untouched(self):
+        out = _normalize_stacked_decorations(r"\uline{\nghighlight{see \texttt{ptr\_addr} here}}")
+        assert out == r"\ngdecorate{\ngmarkHL\ngmarkUL}{see \texttt{ptr\_addr} here}"
+
+    def test_lstlisting_bodies_are_left_verbatim(self):
+        src = "\\begin{lstlisting}\n\\uline{\\sout{code}}\n\\end{lstlisting}"
+        assert _normalize_stacked_decorations(src) == src
+
+    def test_legacy_ul_hl_aliases_are_normalized_too(self):
+        out = _normalize_stacked_decorations(r"\ul{\hl{x}}")
+        assert out == r"\ngdecorate{\ngmarkHL\ngmarkUL}{x}"
+
+    def test_unbalanced_braces_left_untouched(self):
+        src = r"\uline{\textbf{missing close"
+        assert _normalize_stacked_decorations(src) == src
+
+    def test_end_to_end_stacked_formats_compile_without_overfull_hbox(self):
+        # The user-visible bug this pass fixes: ANY combination of underline/
+        # bold/italic/strikethrough/highlight on one long run rendered as a
+        # single unbreakable hbox running 544-699pt off the page margin,
+        # because ulem decorations don't nest (each \ULon treats any inner
+        # brace group — another ulem command or \textbf{...} — as one
+        # unbreakable chunk). _compile_latex_pdf can't surface layout
+        # warnings, so compile the wrapped document directly and assert the
+        # log holds no Overfull \hbox at all.
+        long_run = (
+            "a fairly long sentence that needs to wrap across at least two or "
+            "three lines to prove whether this combination of formatting "
+            "commands stacked together still breaks line-breaking or instead "
+            "runs off the page margin"
+        )
+        combos = [
+            r"\nghighlight{\uline{%s}}",
+            r"\uline{\sout{%s}}",
+            r"\sout{\nghighlight{%s}}",
+            r"\uline{\textbf{%s}}",
+            r"\nghighlight{\textbf{\textit{%s}}}",
+            r"\textbf{\textit{\uline{\nghighlight{\sout{%s}}}}}",
+            r"\sout{\uline{\nghighlight{\textbf{\textit{%s}}}}}",
+        ]
+        body = "\n\n".join(c % long_run for c in combos)
+        doc = _to_pdflatex_safe_text(_wrap_latex_document(_normalize_stacked_decorations(body)))
+        with tempfile.TemporaryDirectory(prefix="ngnotes_decotest_") as tmpdir:
+            tex_path = Path(tmpdir) / "deco.tex"
+            tex_path.write_text(doc, encoding="utf-8")
+            proc = subprocess.run(
+                ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "deco.tex"],
+                cwd=tmpdir, capture_output=True, text=True, check=False,
+            )
+            log = (Path(tmpdir) / "deco.log").read_text(encoding="utf-8", errors="ignore")
+            assert proc.returncode == 0, log[-2000:]
+            assert not re.search(r"Overfull \\hbox", log), re.findall(
+                r"Overfull \\hbox.*", log
+            )
+            assert (Path(tmpdir) / "deco.pdf").read_bytes()[:4] == b"%PDF"
 
 
 # ---------------------------------------------------------------------------

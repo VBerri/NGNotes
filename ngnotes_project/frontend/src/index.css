@@ -39,6 +39,7 @@ html, body, #root {
    final section) — replaces the old per-field editable regions. */
 .ngn-doc-article {
   outline: none;
+  overflow-wrap: break-word;
 }
 .ngn-doc-article:focus {
   box-shadow: 0 0 0 2px rgba(10, 68, 120, 0.25);
@@ -47,6 +48,7 @@ html, body, #root {
 /* Rich-text content styling (abstract/section/fallback bodies). */
 .ngn-rich-content {
   outline: none;
+  overflow-wrap: break-word;
 }
 .ngn-rich-content p {
   margin-top: 0.75rem;
@@ -116,11 +118,13 @@ html, body, #root {
   padding: 0.125rem 0.25rem;
   font-size: 13px;
   color: #1e293b;
+  overflow-wrap: anywhere;
 }
 .ngn-rich-content pre code {
   background: transparent;
   padding: 0;
   color: inherit;
+  overflow-wrap: normal;
 }
 .ngn-rich-content .ngn-math {
   display: inline-block;
@@ -130,6 +134,7 @@ html, body, #root {
   color: inherit;
   border-radius: 0.15rem;
   padding: 0 0.1rem;
+  overflow-wrap: anywhere;
 }
 .ngn-rich-content sup,
 .ngn-rich-content sub {

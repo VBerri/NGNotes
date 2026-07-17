@@ -861,6 +861,198 @@ def _escape_stray_latex_specials(src: str) -> str:
     return "".join(out)
 
 
+# --- Stacked inline decorations ---------------------------------------------
+# ulem-based decorations (\uline, \sout, the preamble's \nghighlight, and the
+# legacy \ul/\hl aliases) do not compose: a \ULon pass treats ANY brace group
+# inside its argument — another ulem command, or a font command like
+# \textbf{...} — as one unbreakable chunk, so a long run with two stacked
+# decorations (or bold INSIDE a decoration) silently runs off the page margin
+# instead of wrapping. Verified by compiling the full combination matrix:
+# every nesting of two ulem commands overflows ~544pt, every
+# \deco{\textbf{long...}} ~699pt, while \textbf{\deco{...}} is fine. The
+# editor nests these in whatever order the user clicked the buttons, so all
+# orders arrive here. Fix, applied at compile time only (stored documents
+# keep the frontend's \uline/\sout/\nghighlight vocabulary so the editor's
+# LaTeX round-trip is untouched):
+#   (a) nested decorations collapse into a single \ngdecorate{<marks>}{...}
+#       — one \ULon pass whose repeating mark paints every layer at once
+#       (the only mechanism that wraps, verified by real compiles), and
+#   (b) font commands nested inside a decoration are hoisted outside it,
+#       splitting the decorated run when the font covers only part of it.
+_INLINE_DECO_MARKS = {
+    "uline": "\\ngmarkUL",
+    "ul": "\\ngmarkUL",
+    "sout": "\\ngmarkSO",
+    "nghighlight": "\\ngmarkHL",
+    "hl": "\\ngmarkHL",
+}
+# Canonical paint order: highlight first (behind), then the rules on top.
+_MARK_ORDER = ["\\ngmarkHL", "\\ngmarkUL", "\\ngmarkSO"]
+# A run that ends up with a single decoration keeps its native command, so
+# solo underline/strikeout/highlight render exactly as before this pass.
+_MARK_TO_NATIVE = {"\\ngmarkHL": "nghighlight", "\\ngmarkUL": "uline", "\\ngmarkSO": "sout"}
+# Hoistable wrappers: safe (and required) OUTSIDE a decoration. Fonts because
+# a \textbf{...} group inside \ULon is one unbreakable chunk; the script
+# commands because \textsuperscript{...} inside any ulem argument is a hard
+# "Extra }" compile error (pre-existing stock-ulem behavior, isolated by test).
+_INLINE_HOIST_COMMANDS = {"textbf", "textit", "emph", "textsuperscript", "textsubscript"}
+# Longer names first so \uline never half-matches as \ul (and \hline never
+# matches as \hl — the required "{" right after the name excludes it anyway).
+_INLINE_FMT_CMD_RE = re.compile(
+    r"\\(uline|ul|sout|nghighlight|hl|textbf|textit|emph|textsuperscript|textsubscript)[ \t]*\{"
+)
+
+
+def _match_brace(text: str, open_idx: int) -> int:
+    """Index of the '}' matching the '{' at open_idx, or -1. Skips
+    backslash-escaped characters so \\{ and \\} don't count."""
+    depth = 0
+    i = open_idx
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def _emit_decorated(chunk: str, marks: frozenset) -> str:
+    if not chunk:
+        return ""
+    ordered = [m for m in _MARK_ORDER if m in marks]
+    if not ordered:
+        return chunk
+    if len(ordered) == 1:
+        return f"\\{_MARK_TO_NATIVE[ordered[0]]}{{{chunk}}}"
+    return f"\\ngdecorate{{{''.join(ordered)}}}{{{chunk}}}"
+
+
+def _rewrite_decorated_run(text: str, marks: frozenset) -> str:
+    """Linearize the inside of a decorated run: plain text and unknown
+    commands stay in \\ngdecorate-wrapped chunks, nested decorations merge
+    into the active mark set, and font commands are hoisted outside the
+    decoration (splitting the run — visually identical, since the repeating
+    mark just restarts at the split)."""
+    out: List[str] = []
+    chunk: List[str] = []
+
+    def flush() -> None:
+        joined = "".join(chunk)
+        chunk.clear()
+        if joined:
+            out.append(_emit_decorated(joined, marks))
+
+    pos = 0
+    n = len(text)
+    while pos < n:
+        m = _INLINE_FMT_CMD_RE.match(text, pos)
+        if m:
+            open_idx = m.end() - 1
+            close_idx = _match_brace(text, open_idx)
+            if close_idx != -1:
+                name = m.group(1)
+                inner = text[open_idx + 1 : close_idx]
+                flush()
+                if name in _INLINE_HOIST_COMMANDS:
+                    out.append(f"\\{name}{{{_rewrite_decorated_run(inner, marks)}}}")
+                else:
+                    out.append(_rewrite_decorated_run(inner, marks | {_INLINE_DECO_MARKS[name]}))
+                pos = close_idx + 1
+                continue
+        ch = text[pos]
+        if ch == "$":
+            # Inline math: copy the whole span opaquely so a \textbf inside
+            # math is never hoisted across the "$" delimiters. A short math
+            # chunk inside \ULon is unbreakable but compiles and lays out
+            # fine (verified).
+            j = pos + 1
+            while j < n and text[j] != "$":
+                j += 2 if text[j] == "\\" else 1
+            if j < n:
+                chunk.append(text[pos : j + 1])
+                pos = j + 1
+                continue
+        if ch == "\\" and pos + 1 < n:
+            # Opaque command (\texttt, \textsuperscript, ...) or escaped
+            # char (\%, \{, \\): copy it verbatim — plus its balanced brace
+            # argument if one follows, so a known command nested inside an
+            # unknown one is never hoisted across that boundary.
+            cmd = re.match(r"\\[a-zA-Z@]+", text[pos:])
+            end = pos + (cmd.end() if cmd else 2)
+            if end < n and text[end] == "{":
+                group_end = _match_brace(text, end)
+                if group_end != -1:
+                    end = group_end + 1
+            chunk.append(text[pos:end])
+            pos = end
+            continue
+        if ch == "{":
+            group_end = _match_brace(text, pos)
+            if group_end != -1:
+                chunk.append(text[pos : group_end + 1])
+                pos = group_end + 1
+                continue
+        chunk.append(ch)
+        pos += 1
+    flush()
+    return "".join(out)
+
+
+def _rewrite_decorations(text: str) -> str:
+    """Walk text outside any decoration, rewriting each decorated run found.
+    Font commands recurse (a decoration nested inside \\textbf{...} still
+    needs normalizing) but are otherwise left in place — font-outside-
+    decoration is the order that wraps correctly."""
+    out: List[str] = []
+    pos = 0
+    while True:
+        m = _INLINE_FMT_CMD_RE.search(text, pos)
+        if not m:
+            out.append(text[pos:])
+            break
+        open_idx = m.end() - 1
+        close_idx = _match_brace(text, open_idx)
+        if close_idx == -1:
+            # Unbalanced braces — leave the remainder untouched.
+            out.append(text[pos:])
+            break
+        out.append(text[pos : m.start()])
+        name = m.group(1)
+        inner = text[open_idx + 1 : close_idx]
+        if name in _INLINE_HOIST_COMMANDS:
+            out.append(f"\\{name}{{{_rewrite_decorations(inner)}}}")
+        else:
+            out.append(_rewrite_decorated_run(inner, frozenset({_INLINE_DECO_MARKS[name]})))
+        pos = close_idx + 1
+    return "".join(out)
+
+
+# Listing/verbatim bodies only — NOT math spans. Protecting $...$ at this
+# level would split a decorated run like \uline{a $x$ b} into brace-unbalanced
+# fragments the rewriter must bail on (leaving the broken nesting in place);
+# math is instead handled opaquely inside _rewrite_decorated_run.
+_DECOR_PROTECTED_SPAN_RE = re.compile("(" + _LISTING_ENV_RE.pattern + ")", re.DOTALL | re.IGNORECASE)
+
+
+def _normalize_stacked_decorations(src: str) -> str:
+    """Compile-time rewrite of stacked/nested inline decorations into forms
+    that line-break correctly (see the block comment above). Listing/verbatim
+    bodies are left verbatim."""
+    parts = _DECOR_PROTECTED_SPAN_RE.split(str(src or ""))
+    out: List[str] = []
+    for idx, part in enumerate(parts):
+        out.append(part if idx % 2 == 1 else _rewrite_decorations(part))
+    return "".join(out)
+
+
 _TABULAR_BLOCK_RE = re.compile(r"\\begin\{tabular\}\{[^{}]*\}(.*?)\\end\{tabular\}", re.DOTALL)
 
 
@@ -1365,7 +1557,47 @@ def _wrap_latex_document(body: str) -> str:
         "  colframe=ngntextttrule, boxrule=0.4pt, left=3pt, right=3pt,\n"
         "  top=1pt, bottom=1pt, boxsep=0pt, fontupper=\\ttfamily\\small}\n"
         "\\renewcommand{\\texttt}[1]{\\ngntexttt{#1}}\n"
+        # Underline: ulem's \uline (not plain \underline{}) wraps across
+        # lines for the same reason \nghighlight below avoids \colorbox.
         "\\usepackage[normalem]{ulem}\n"
+        # Highlight (rich-text editor's Highlight button): both a plain
+        # \colorbox{yellow}{...} and a tcolorbox "on line" \newtcbox (tried
+        # next, also reverted) put the whole argument in one unbreakable
+        # hbox, so any highlight longer than the remaining line runs
+        # straight off the page margin (confirmed: ~624pt Overfull \hbox on
+        # a one-sentence highlight). ulem's mark-over machinery is the only
+        # loaded mechanism that breaks at spaces, so paint the highlight
+        # the same way \uline paints its underline: a repeating full-height
+        # yellow rule laid down word chunk by word chunk. Unlike soul's \hl
+        # (tried first, reverted -- conflicts with ulem and tokenizes its
+        # argument), this tolerates nested \textbf{}/\textit{}/\sout{}
+        # exactly as well as \uline does. \ULon closes the \bgroup.
+        "\\newcommand{\\nghighlight}{\\bgroup\n"
+        "  \\markoverwith{\\textcolor{yellow}{\\rule[-0.55ex]{2pt}{2.4ex}}}\\ULon}\n"
+        # Stacked decorations (any two of underline/strikeout/highlight on the
+        # same text): ulem's mark-over machinery cannot nest — a \ULon pass
+        # treats ANY brace group inside its argument, including another ulem
+        # command or a \textbf{...}, as one unbreakable chunk, so e.g.
+        # \uline{\sout{long sentence}} runs ~544pt off the page (confirmed by
+        # compiling the full combination matrix). The only mechanism that
+        # wraps is a SINGLE \ULon pass whose repeating mark paints every
+        # requested decoration at once: each \ngmark* below is a zero-width
+        # \rlap layer (highlight first so the rules paint on top of the
+        # yellow), and the trailing 2pt strut gives the mark box its
+        # repetition width. _normalize_stacked_decorations rewrites nested
+        # \uline/\sout/\nghighlight into \ngdecorate{<marks>}{text} at
+        # compile time; single decorations keep their native commands.
+        "\\newcommand{\\ngmarkHL}{\\rlap{\\textcolor{yellow}{\\rule[-0.55ex]{2pt}{2.4ex}}}}\n"
+        "\\newcommand{\\ngmarkUL}{\\rlap{\\rule[-0.6ex]{2pt}{0.4pt}}}\n"
+        "\\newcommand{\\ngmarkSO}{\\rlap{\\rule[0.52ex]{2pt}{0.4pt}}}\n"
+        "\\newcommand{\\ngdecorate}[1]{\\bgroup\\markoverwith{#1\\rule{2pt}{0pt}}\\ULon}\n"
+        # Backward compat: documents saved while soul was briefly in use may
+        # still contain its \ul{}/\hl{} commands. soul itself stays gone (it
+        # conflicts with ulem and errors on nested \textbf{}/\textit{}), so
+        # map those old names onto the current implementations instead of
+        # letting old documents die with "Undefined control sequence".
+        "\\providecommand{\\ul}[1]{\\uline{#1}}\n"
+        "\\providecommand{\\hl}[1]{\\nghighlight{#1}}\n"
         "\\begin{document}\n"
         + body
         + "\n\\end{document}\n"
@@ -1395,7 +1627,10 @@ def _extract_latex_error_detail(log_text: str, doc_lines: List[str]) -> str:
 
 
 def _compile_latex_pdf(latex_body: str) -> bytes:
-    doc = _to_pdflatex_safe_text(_wrap_latex_document(latex_body))
+    # Stacked-decoration normalization happens here — at compile time only —
+    # so stored documents keep the \uline/\sout/\nghighlight vocabulary the
+    # frontend editor round-trips (see _normalize_stacked_decorations).
+    doc = _to_pdflatex_safe_text(_wrap_latex_document(_normalize_stacked_decorations(latex_body)))
     doc_lines = doc.splitlines()
     with tempfile.TemporaryDirectory(prefix="ngnotes_tex_") as tmpdir:
         tex_path = Path(tmpdir) / "report.tex"
